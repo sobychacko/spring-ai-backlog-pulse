@@ -1,0 +1,17 @@
+target/
+*.class
+*.log
+.idea/
+*.iml
+.vscode/
+.DS_Store
+node_modules/
+dist/
+frontend/tsconfig.tsbuildinfo
+
+# Local secret override — Spring Boot auto-loads ./config/application.yml with higher
+# precedence than the packaged one. Keep the real key here; never commit it.
+/config/application.yml
+
+# Internal planning doc — not part of the public repo
+PLAN.md

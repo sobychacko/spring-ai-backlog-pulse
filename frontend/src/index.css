@@ -1,0 +1,33 @@
+@import "tailwindcss";
+
+@theme {
+  --color-base:    #0d1117;
+  --color-surface: #161b22;
+  --color-edge:    #30363d;
+  --color-subtle:  #8b949e;
+  --color-body:    #e6edf3;
+  --color-accent:  #58a6ff;
+  --color-primary: #1f6feb;
+  --color-success: #3fb950;
+  --color-warn:    #d29922;
+  --color-danger:  #f85149;
+  --color-purple:  #d2a8ff;
+}
+
+html, body, #root {
+  height: 100%;
+}
+
+body {
+  background-color: #0d1117;
+  color: #e6edf3;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+/* ECharts tooltip inherits wrong fonts — reset */
+.ec-tooltip {
+  font-family: inherit !important;
+  font-size: 13px !important;
+}

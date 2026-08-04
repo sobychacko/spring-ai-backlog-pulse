@@ -1,0 +1,84 @@
+/*
+ * Copyright 2026-present the original author or authors.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      https://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package com.springai.pulse.web;
+
+import java.util.Map;
+
+import com.springai.pulse.cluster.ClusterService;
+import com.springai.pulse.embed.DuplicateScanService;
+import com.springai.pulse.embed.EmbedService;
+
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
+
+/**
+ * Admin-only POST triggers for the MVP 4 embedding + clustering pipeline. These are
+ * intended to be called manually from the dashboard admin menu, not from a browser
+ * navigation flow — they can take seconds to minutes depending on corpus size.
+ */
+@RestController
+@RequestMapping("/api")
+public class EmbedController {
+
+	private final EmbedService embed;
+
+	private final DuplicateScanService dupScan;
+
+	private final ClusterService cluster;
+
+	public EmbedController(EmbedService embed, DuplicateScanService dupScan, ClusterService cluster) {
+		this.embed = embed;
+		this.dupScan = dupScan;
+		this.cluster = cluster;
+	}
+
+	/** Embed all unembedded items into the pgvector store. Free — local ONNX, no API cost. */
+	@PostMapping("/embed")
+	public Map<String, Object> embed() {
+		int count = this.embed.embedAll();
+		return Map.of("embedded", count, "total", this.embed.embeddedCount());
+	}
+
+	/**
+	 * Scan vector store for similar pairs and insert duplicate/related candidates. Uses
+	 * the Haiku LLM for PR↔Issue pairs only (to distinguish fix-relationship from
+	 * co-occurrence). Pass {@code threshold} to override the default 0.85.
+	 */
+	@PostMapping("/scan-duplicates")
+	public Map<String, Object> scanDuplicates(@RequestParam(defaultValue = "0.85") double threshold) {
+		double t = Math.min(Math.max(threshold, 0.5), 0.99);
+		int candidates = this.dupScan.scan(t);
+		return Map.of("candidates", candidates, "threshold", t);
+	}
+
+	/**
+	 * Rebuild theme clusters from the similarity graph. Free for the graph step; uses
+	 * one Haiku call per cluster for naming.
+	 */
+	@PostMapping("/cluster")
+	public ResponseEntity<Map<String, Object>> cluster() {
+		int count = this.cluster.buildClusters();
+		if (count == 0) {
+			return ResponseEntity.ok(Map.of("clusters", 0, "message", "no items embedded yet — run /api/embed first"));
+		}
+		return ResponseEntity.ok(Map.of("clusters", count));
+	}
+
+}

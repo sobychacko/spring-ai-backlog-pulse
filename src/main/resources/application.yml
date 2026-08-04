@@ -1,0 +1,50 @@
+spring:
+  application:
+    name: backlog-pulse
+  datasource:
+    url: jdbc:postgresql://localhost:5432/pulse
+    username: pulse
+    password: pulse
+  flyway:
+    enabled: true
+    baseline-on-migrate: true
+  ai:
+    anthropic:
+      api-key: ${ANTHROPIC_API_KEY:}
+      chat:
+        options:
+          model: claude-haiku-4-5
+          max-tokens: 1024
+    embedding:
+      transformer:
+        # all-mpnet-base-v2: 768-dim, much stronger semantic similarity than MiniLM-L6-v2.
+        # First boot downloads ~420 MB and caches it; subsequent boots are instant.
+        onnx:
+          model-uri: https://huggingface.co/sentence-transformers/all-mpnet-base-v2/resolve/main/onnx/model.onnx
+        tokenizer:
+          uri: https://huggingface.co/sentence-transformers/all-mpnet-base-v2/resolve/main/tokenizer.json
+        cache:
+          directory: ${user.home}/.cache/spring-ai
+    vectorstore:
+      pgvector:
+        dimensions: 768
+        index-type: HNSW
+        distance-type: COSINE_DISTANCE
+        initialize-schema: true
+
+github:
+  token: ${GITHUB_TOKEN:}
+  repo: spring-projects/spring-ai
+  api-base: https://api.github.com
+
+pulse:
+  ingest:
+    page-size: 100
+  classify:
+    concurrency: 8
+    # ~2k tokens of body is plenty for classification signal (cost guard)
+    max-body-chars: 8000
+
+logging:
+  level:
+    com.springai.pulse: INFO
