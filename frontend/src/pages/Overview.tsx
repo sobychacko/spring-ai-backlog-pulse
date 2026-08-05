@@ -3,6 +3,7 @@ import type { EChartsOption } from 'echarts'
 import type { Facets } from '../api'
 import { EChart } from '../components/EChart'
 import { StatCard } from '../components/StatCard'
+import { escapeHtml } from '../html'
 import { ItemDrawer } from '../components/ItemDrawer'
 
 // Shared palette / text style for all charts
@@ -49,7 +50,7 @@ function ageOption(data: Facets['ageHistogram']): EChartsOption {
       textStyle: { color: '#e6edf3', fontSize: 13 },
       formatter: (params: unknown) => {
         const p = (params as { name: string; value: number }[])[0]
-        return `${p.name}: <b>${p.value}</b>`
+        return `${escapeHtml(p.name)}: <b>${p.value}</b>`
       },
     },
   }
@@ -71,7 +72,11 @@ function enhancementKindOption(data: Facets['byEnhancementKind']): EChartsOption
       backgroundColor: '#1c2128',
       borderColor: '#30363d',
       textStyle: { color: '#e6edf3', fontSize: 13 },
-      formatter: '{b}: <b>{c}</b> ({d}%)',
+      // function form: ECharts does not HTML-escape the '{b}' template placeholder
+      formatter: (p: unknown) => {
+        const { name, value, percent } = p as { name: string; value: number; percent: number }
+        return `${escapeHtml(name)}: <b>${value}</b> (${percent}%)`
+      },
     },
     legend: {
       bottom: 4,

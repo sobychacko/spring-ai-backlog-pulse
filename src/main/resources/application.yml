@@ -1,3 +1,7 @@
+server:
+  # Railway (and most PaaS) inject PORT; default stays 8080 locally
+  port: ${PORT:8080}
+
 spring:
   application:
     name: backlog-pulse
@@ -38,12 +42,26 @@ github:
   api-base: https://api.github.com
 
 pulse:
+  # required on all non-GET /api requests (X-Admin-Token header) when set; empty = local
+  # single-user mode with no guard. MUST be set for any deployment (e.g. Railway).
+  admin:
+    token: ${PULSE_ADMIN_TOKEN:}
   ingest:
     page-size: 100
+  sync:
+    # set true to enable the scheduled incremental sync (the hands-off "live" mode);
+    # false = sync runs only manually via Admin → Sync / POST /api/sync
+    scheduled: false
+    initial-delay: 2m
+    interval: 10m
   classify:
     concurrency: 8
     # ~2k tokens of body is plenty for classification signal (cost guard)
     max-body-chars: 8000
+    # MVP 6: second-opinion model for the comparison workflow; dual-model gates whether
+    # backfill/sync also classify with it automatically (manual POST /api/classify-sonnet otherwise)
+    sonnet-model: claude-sonnet-4-6
+    dual-model: false
 
 logging:
   level:

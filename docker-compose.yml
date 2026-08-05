@@ -7,7 +7,8 @@ services:
       POSTGRES_USER: pulse
       POSTGRES_PASSWORD: pulse
     ports:
-      - "5432:5432"
+      # bind loopback only — LAN peers must not reach the DB (dev credentials)
+      - "127.0.0.1:5432:5432"
     volumes:
       - pulse-pgdata:/var/lib/postgresql/data
     healthcheck:

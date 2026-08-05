@@ -3,6 +3,7 @@ import type { EChartsOption } from 'echarts'
 import type { Facets, FacetCount } from '../api'
 import { EChart } from '../components/EChart'
 import { ItemDrawer } from '../components/ItemDrawer'
+import { escapeHtml } from '../html'
 
 const BASE_TEXT = { color: '#8b949e', fontSize: 12, fontFamily: 'inherit' }
 const SPLIT_LINE = { lineStyle: { color: '#30363d' } }
@@ -53,7 +54,7 @@ function horizBarOption(data: FacetCount[], color = '#1f6feb', topN = 20): EChar
       ...TOOLTIP_STYLE,
       formatter: (params: unknown) => {
         const p = (params as { name: string; value: number }[])[0]
-        return `${p.name}: <b>${p.value}</b>`
+        return `${escapeHtml(p.name)}: <b>${p.value}</b>`
       },
     },
   }
@@ -78,7 +79,11 @@ function enhancementKindOption(data: FacetCount[]): EChartsOption {
     tooltip: {
       trigger: 'item',
       ...TOOLTIP_STYLE,
-      formatter: '{b}: <b>{c}</b> ({d}%)',
+      // function form: ECharts does not HTML-escape the '{b}' template placeholder
+      formatter: (p: unknown) => {
+        const { name, value, percent } = p as { name: string; value: number; percent: number }
+        return `${escapeHtml(name)}: <b>${value}</b> (${percent}%)`
+      },
     },
     legend: {
       right: 0,

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { EChart } from '../components/EChart'
+import { escapeHtml } from '../html'
 import {
   fetchClusterItems,
   fetchClusters,
@@ -405,8 +406,8 @@ function PulseHeatmap({ data, onCellClick }: { data: HeatmapData; onCellClick: (
       textStyle: { color: '#e6edf3', fontSize: 12 },
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       formatter: (p: { value: any }) =>
-        `<span style="color:${areaColor(data.areas[p.value[1]])};font-weight:600">${data.areas[p.value[1]]}</span>` +
-        `<br/>${visWeeks[p.value[0]]}<br/><span style="color:#8b949e">${p.value[2]} items</span>`,
+        `<span style="color:${areaColor(data.areas[p.value[1]])};font-weight:600">${escapeHtml(data.areas[p.value[1]])}</span>` +
+        `<br/>${escapeHtml(visWeeks[p.value[0]])}<br/><span style="color:#8b949e">${p.value[2]} items</span>`,
     },
     grid: { top: 8, left: 110, right: 16, bottom: 56 },
     xAxis: {
