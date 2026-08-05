@@ -15,3 +15,6 @@ frontend/tsconfig.tsbuildinfo
 
 # Internal planning doc — not part of the public repo
 PLAN.md
+
+# local database dump for deployment seeding
+*.dump

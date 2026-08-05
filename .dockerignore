@@ -1,0 +1,9 @@
+# Never ship secrets or local state into the image context
+config/
+*.dump
+.git/
+.idea/
+target/
+frontend/node_modules/
+frontend/dist/
+PLAN.md
