@@ -21,6 +21,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import com.springai.pulse.classify.ClassifyService;
+import com.springai.pulse.config.PulseProperties;
 import com.springai.pulse.ingest.IngestService;
 import com.springai.pulse.persistence.SyncStateRepository;
 import jakarta.annotation.PreDestroy;
@@ -45,6 +46,8 @@ public class BackfillService {
 
 	private final SyncStateRepository syncState;
 
+	private final PulseProperties props;
+
 	private final AtomicBoolean running = new AtomicBoolean(false);
 
 	private final AtomicBoolean syncRunning = new AtomicBoolean(false);
@@ -55,14 +58,17 @@ public class BackfillService {
 		return t;
 	});
 
-	private volatile String lastResult = "never run";
+	// empty until a run happens — the UI shows nothing rather than a confusing "never run"
+	private volatile String lastResult = "";
 
-	private volatile String lastSyncResult = "never run";
+	private volatile String lastSyncResult = "";
 
-	public BackfillService(IngestService ingest, ClassifyService classify, SyncStateRepository syncState) {
+	public BackfillService(IngestService ingest, ClassifyService classify, SyncStateRepository syncState,
+			PulseProperties props) {
 		this.ingest = ingest;
 		this.classify = classify;
 		this.syncState = syncState;
+		this.props = props;
 	}
 
 	/**
@@ -93,6 +99,16 @@ public class BackfillService {
 		return this.classify.classifyPending(limit);
 	}
 
+	/**
+	 * Classify pending items with the second-opinion Sonnet model, capped at {@code limit}
+	 * (0 = all). Synchronous; a small limit gives a cheap comparison sample. Metered — Sonnet
+	 * rates are 3x Haiku's.
+	 * @return the number classified
+	 */
+	public int classifySonnet(int limit) {
+		return this.classify.classifyPendingSonnet(limit);
+	}
+
 	public boolean isRunning() {
 		return this.running.get();
 	}
@@ -114,8 +130,10 @@ public class BackfillService {
 			try {
 				int ingested = this.ingest.ingestAll();
 				int classified = this.classify.classifyPending();
+				int sonnetClassified = this.props.classify().dualModel() ? this.classify.classifyPendingSonnet(0) : 0;
 				long secs = (System.currentTimeMillis() - start) / 1000;
-				this.lastResult = "ingested=%d, classified=%d, %ds".formatted(ingested, classified, secs);
+				this.lastResult = "ingested=%d, classified=%d, sonnet=%d, %ds".formatted(ingested, classified,
+						sonnetClassified, secs);
 				logger.info("Backfill finished: {}", this.lastResult);
 			}
 			catch (Exception ex) {
@@ -150,6 +168,9 @@ public class BackfillService {
 				int classified = 0;
 				if (result.count() > 0) {
 					classified = this.classify.classifyPending();
+					if (this.props.classify().dualModel()) {
+						classified += this.classify.classifyPendingSonnet(0);
+					}
 					this.syncState.advance(result.latestUpdatedAt());
 				}
 				else {

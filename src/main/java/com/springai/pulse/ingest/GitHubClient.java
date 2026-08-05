@@ -16,6 +16,7 @@
 
 package com.springai.pulse.ingest;
 
+import java.net.URI;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -23,6 +24,8 @@ import tools.jackson.databind.JsonNode;
 
 import com.springai.pulse.config.GitHubProperties;
 
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 import org.springframework.web.client.RestClient;
@@ -56,7 +59,7 @@ public class GitHubClient {
 	 * ~14 requests — comfortably within GitHub's authenticated rate limit.
 	 */
 	public List<JsonNode> fetchOpenItems(int pageSize) {
-		return fetchPage("state=open", null, pageSize);
+		return fetchAll("/repos/" + this.props.repo() + "/issues?state=open&per_page=" + pageSize);
 	}
 
 	/**
@@ -64,23 +67,7 @@ public class GitHubClient {
 	 * target branch. The {@code /issues} listing does not include this field.
 	 */
 	public List<JsonNode> fetchOpenPullRequests(int pageSize) {
-		List<JsonNode> all = new ArrayList<>();
-		int page = 1;
-		while (true) {
-			JsonNode arr = this.rest.get()
-				.uri("/repos/" + this.props.repo() + "/pulls?state=open&per_page={ps}&page={p}", pageSize, page)
-				.retrieve()
-				.body(JsonNode.class);
-			if (arr == null || !arr.isArray() || arr.isEmpty()) {
-				break;
-			}
-			arr.forEach(all::add);
-			if (arr.size() < pageSize) {
-				break;
-			}
-			page++;
-		}
-		return all;
+		return fetchAll("/repos/" + this.props.repo() + "/pulls?state=open&per_page=" + pageSize);
 	}
 
 	/**
@@ -88,31 +75,53 @@ public class GitHubClient {
 	 * update time so the caller can advance the cursor to the last item seen.
 	 */
 	public List<JsonNode> fetchItemsSince(String since, int pageSize) {
-		return fetchPage("state=all&sort=updated&direction=asc", since, pageSize);
+		String sinceParam = (since != null && !since.isBlank()) ? "&since=" + since : "";
+		return fetchAll("/repos/" + this.props.repo() + "/issues?state=all&sort=updated&direction=asc" + sinceParam
+				+ "&per_page=" + pageSize);
 	}
 
-	private List<JsonNode> fetchPage(String baseParams, String since, int pageSize) {
+	/**
+	 * Follow {@code Link: <...>; rel="next"} headers instead of incrementing a {@code page}
+	 * parameter — GitHub rejects page-based pagination on large result sets (422) and hands out
+	 * cursor URLs in the Link header instead.
+	 */
+	private List<JsonNode> fetchAll(String firstUri) {
 		List<JsonNode> all = new ArrayList<>();
-		String sinceParam = (since != null && !since.isBlank()) ? "&since=" + since : "";
-		int page = 1;
-		while (true) {
-			// repo is trusted config and contains a slash, so inline it rather than templating
-			// (a path variable would be URL-encoded and break the path).
-			JsonNode arr = this.rest.get()
-				.uri("/repos/" + this.props.repo() + "/issues?" + baseParams + sinceParam + "&per_page={ps}&page={p}",
-						pageSize, page)
-				.retrieve()
-				.body(JsonNode.class);
+		// repo is trusted config and contains a slash, so URIs are built by concatenation
+		// (a templated path variable would be URL-encoded and break the path).
+		URI next = URI.create(this.props.apiBase() + firstUri);
+		String apiHost = next.getHost();
+		while (next != null) {
+			// the Authorization header rides along on every request — never follow a Link
+			// that points off the configured API host
+			if (!apiHost.equalsIgnoreCase(next.getHost())) {
+				throw new IllegalStateException("Refusing to follow pagination link to foreign host: " + next);
+			}
+			ResponseEntity<JsonNode> resp = this.rest.get().uri(next).retrieve().toEntity(JsonNode.class);
+			JsonNode arr = resp.getBody();
 			if (arr == null || !arr.isArray() || arr.isEmpty()) {
 				break;
 			}
 			arr.forEach(all::add);
-			if (arr.size() < pageSize) {
-				break;
-			}
-			page++;
+			next = nextLink(resp.getHeaders());
 		}
 		return all;
+	}
+
+	private static URI nextLink(HttpHeaders headers) {
+		List<String> linkHeaders = headers.getOrEmpty(HttpHeaders.LINK);
+		for (String header : linkHeaders) {
+			for (String part : header.split(",")) {
+				String[] segments = part.split(";");
+				if (segments.length >= 2 && segments[1].trim().equals("rel=\"next\"")) {
+					String url = segments[0].trim();
+					if (url.startsWith("<") && url.endsWith(">")) {
+						return URI.create(url.substring(1, url.length() - 1));
+					}
+				}
+			}
+		}
+		return null;
 	}
 
 }

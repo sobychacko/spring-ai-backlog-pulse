@@ -17,6 +17,7 @@
 package com.springai.pulse.config;
 
 import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.boot.context.properties.bind.DefaultValue;
 
 @ConfigurationProperties(prefix = "pulse")
 public record PulseProperties(Ingest ingest, Classify classify) {
@@ -24,7 +25,8 @@ public record PulseProperties(Ingest ingest, Classify classify) {
 	public record Ingest(int pageSize) {
 	}
 
-	public record Classify(int concurrency, int maxBodyChars) {
+	public record Classify(int concurrency, int maxBodyChars,
+			@DefaultValue("claude-sonnet-4-6") String sonnetModel, @DefaultValue("false") boolean dualModel) {
 	}
 
 }

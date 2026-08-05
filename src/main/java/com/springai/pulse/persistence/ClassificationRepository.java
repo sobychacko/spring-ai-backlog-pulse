@@ -67,13 +67,13 @@ public class ClassificationRepository {
 						cast(:vectorStores as jsonb), :severity, :goodFirstIssue, :summary,
 						:reviewComplexity, :reviewNotes, :mainBranchApplicable, :mainBranchNote,
 						:modelUsed, :contentHash, now())
-				on conflict (item_number) do update set
+				on conflict (item_number, model_used) do update set
 						type = excluded.type, enhancement_kind = excluded.enhancement_kind, area = excluded.area,
 						providers = excluded.providers, vector_stores = excluded.vector_stores,
 						severity = excluded.severity, good_first_issue = excluded.good_first_issue,
 						summary = excluded.summary, review_complexity = excluded.review_complexity,
 						review_notes = excluded.review_notes, main_branch_applicable = excluded.main_branch_applicable,
-						main_branch_note = excluded.main_branch_note, model_used = excluded.model_used,
+						main_branch_note = excluded.main_branch_note,
 						content_hash = excluded.content_hash, classified_at = now()
 				""", params);
 	}

@@ -16,11 +16,29 @@
 
 package com.springai.pulse.domain;
 
+import com.fasterxml.jackson.annotation.JsonCreator;
+
 /**
  * AI-suggested classification of what an item is. Constrains the LLM's structured output.
  */
 public enum ItemType {
 
-	BUG, ENHANCEMENT, QUESTION, DOCUMENTATION, TASK
+	BUG, ENHANCEMENT, QUESTION, DOCUMENTATION, TASK;
+
+	/**
+	 * Lenient mapping for model output: the LLM occasionally emits an {@link EnhancementKind}
+	 * value (IMPROVEMENT / NEW_FEATURE) or a common synonym here instead of failing the whole
+	 * classification, coerce the known cases.
+	 */
+	@JsonCreator
+	public static ItemType fromModelOutput(String value) {
+		String v = value == null ? "" : value.trim().toUpperCase().replace('-', '_').replace(' ', '_');
+		return switch (v) {
+			case "IMPROVEMENT", "NEW_FEATURE", "FEATURE", "FEATURE_REQUEST" -> ENHANCEMENT;
+			case "DOCS", "DOC" -> DOCUMENTATION;
+			case "DEFECT" -> BUG;
+			default -> valueOf(v);
+		};
+	}
 
 }

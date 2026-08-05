@@ -95,6 +95,8 @@ public class IngestService {
 		}
 		logger.info("Ingest complete: {} items ({} issues, {} PRs), {} GH-native links", nodes.size(), issues, prs,
 				this.links.count());
+		// the /issues listing has no base.ref — fetch branches from /pulls (~5 requests)
+		ingestPrBaseBranches();
 		return nodes.size();
 	}
 
@@ -110,16 +112,23 @@ public class IngestService {
 			return new IngestResult(0, cursor);
 		}
 		String latestUpdatedAt = cursor;
+		boolean sawPr = false;
 		for (JsonNode node : nodes) {
 			GhItem item = map(node);
 			this.items.upsert(item);
-			if (item.kind() == ItemKind.PR && item.body() != null) {
-				parseLinks(item.number(), item.body());
+			if (item.kind() == ItemKind.PR) {
+				sawPr = true;
+				if (item.body() != null) {
+					parseLinks(item.number(), item.body());
+				}
 			}
 			String updatedAt = text(node, "updated_at");
 			if (updatedAt != null && (latestUpdatedAt == null || updatedAt.compareTo(latestUpdatedAt) > 0)) {
 				latestUpdatedAt = updatedAt;
 			}
+		}
+		if (sawPr) {
+			ingestPrBaseBranches();
 		}
 		logger.info("Incremental ingest since {}: {} item(s), latest updated_at={}", cursor, nodes.size(), latestUpdatedAt);
 		return new IngestResult(nodes.size(), latestUpdatedAt);
@@ -154,11 +163,22 @@ public class IngestService {
 				prBaseBranch = text(base, "ref");
 			}
 		}
+		List<String> assignees = new ArrayList<>();
+		JsonNode assigneesNode = n.get("assignees");
+		if (assigneesNode != null && assigneesNode.isArray()) {
+			assigneesNode.forEach(a -> {
+				String login = text(a, "login");
+				if (login != null) {
+					assignees.add(login);
+				}
+			});
+		}
 		return new GhItem(number, isPr ? ItemKind.PR : ItemKind.ISSUE, title, body, text(n, "state"), author,
 				text(n, "author_association"), parseTime(text(n, "created_at")), parseTime(text(n, "updated_at")),
 				parseTime(text(n, "closed_at")), n.path("comments").asInt(0),
 				n.path("reactions").path("total_count").asInt(0), labels, text(n, "html_url"),
-				isPr ? n.path("draft").asBoolean(false) : null, null, contentHash(title, body), prBaseBranch);
+				isPr ? n.path("draft").asBoolean(false) : null, null, contentHash(title, body), prBaseBranch,
+				assignees);
 	}
 
 	/**

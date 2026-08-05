@@ -16,15 +16,17 @@
 
 package com.springai.pulse.domain;
 
-import java.time.OffsetDateTime;
-import java.util.List;
-
 /**
- * A GitHub issue or pull request as pulled from the API — the raw facts, the source of truth.
- * No AI-derived fields live here.
+ * Model identifiers. With dual-model classification the {@code classification} table holds one
+ * row per (item, model); every query joining it must pick a model, defaulting to the bulk
+ * classifier below.
  */
-public record GhItem(int number, ItemKind kind, String title, String body, String state, String author,
-		String authorAssoc, OffsetDateTime createdAt, OffsetDateTime updatedAt, OffsetDateTime closedAt,
-		int commentsCount, int reactionsTotal, List<String> labels, String url, Boolean prDraft,
-		String prMergeState, String contentHash, String prBaseBranch, List<String> assignees) {
+public final class ModelIds {
+
+	/** The bulk classifier — the model whose rows back the dashboard by default. */
+	public static final String DEFAULT_CLASSIFIER = "claude-haiku-4-5";
+
+	private ModelIds() {
+	}
+
 }

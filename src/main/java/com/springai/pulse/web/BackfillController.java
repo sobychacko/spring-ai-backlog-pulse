@@ -57,6 +57,12 @@ public class BackfillController {
 		return Map.of("classified", classified);
 	}
 
+	@PostMapping("/classify-sonnet")
+	public Map<String, Object> classifySonnet(@RequestParam(defaultValue = "0") int limit) {
+		int classified = this.backfill.classifySonnet(limit);
+		return Map.of("classified", classified);
+	}
+
 	@PostMapping("/backfill")
 	public ResponseEntity<Map<String, Object>> run() {
 		boolean started = this.backfill.triggerAsync();

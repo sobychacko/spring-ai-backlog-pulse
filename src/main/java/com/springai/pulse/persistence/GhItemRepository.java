@@ -59,14 +59,15 @@ public class GhItemRepository {
 			.addValue("prDraft", item.prDraft())
 			.addValue("prMergeState", item.prMergeState())
 			.addValue("contentHash", item.contentHash())
-			.addValue("prBaseBranch", item.prBaseBranch());
+			.addValue("prBaseBranch", item.prBaseBranch())
+			.addValue("assignees", toJson(item.assignees()));
 		this.jdbc.update("""
 				insert into gh_item (number, kind, title, body, state, author, author_assoc, created_at,
 						updated_at, closed_at, comments_count, reactions_total, labels, url, pr_draft,
-						pr_merge_state, content_hash, last_synced_at, pr_base_branch)
+						pr_merge_state, content_hash, last_synced_at, pr_base_branch, assignees)
 				values (:number, :kind, :title, :body, :state, :author, :authorAssoc, :createdAt,
 						:updatedAt, :closedAt, :commentsCount, :reactionsTotal, cast(:labels as jsonb), :url,
-						:prDraft, :prMergeState, :contentHash, now(), :prBaseBranch)
+						:prDraft, :prMergeState, :contentHash, now(), :prBaseBranch, cast(:assignees as jsonb))
 				on conflict (number) do update set
 						kind = excluded.kind, title = excluded.title, body = excluded.body,
 						state = excluded.state, author = excluded.author, author_assoc = excluded.author_assoc,
@@ -75,7 +76,8 @@ public class GhItemRepository {
 						reactions_total = excluded.reactions_total, labels = excluded.labels, url = excluded.url,
 						pr_draft = excluded.pr_draft, pr_merge_state = excluded.pr_merge_state,
 						content_hash = excluded.content_hash, last_synced_at = now(),
-						pr_base_branch = coalesce(excluded.pr_base_branch, gh_item.pr_base_branch)
+						pr_base_branch = coalesce(excluded.pr_base_branch, gh_item.pr_base_branch),
+						assignees = excluded.assignees
 				""", params);
 	}
 
@@ -99,22 +101,22 @@ public class GhItemRepository {
 	}
 
 	/**
-	 * Open items that have no classification yet, whose content changed since last classified,
-	 * or (for PRs) whose review_complexity has not been populated yet.
+	 * Open items that {@code model} has not classified yet, whose content changed since it last
+	 * classified them, or (for PRs) whose review_complexity has not been populated yet.
 	 */
-	public List<ItemText> findNeedingClassification() {
-		return this.jdbc.getJdbcTemplate().query("""
+	public List<ItemText> findNeedingClassification(String model) {
+		return this.jdbc.query("""
 				select i.number, i.kind, i.title, i.body, i.content_hash, i.pr_base_branch
 				from gh_item i
-				left join classification c on c.item_number = i.number
+				left join classification c on c.item_number = i.number and c.model_used = :model
 				where i.state = 'open'
 					and (c.item_number is null
 						or c.content_hash is distinct from i.content_hash
 						or (c.type = 'ENHANCEMENT' and c.enhancement_kind is null)
 						or (i.kind = 'pr' and c.review_complexity is null))
 				order by i.number
-				""", (rs, n) -> new ItemText(rs.getInt("number"), rs.getString("kind"),
-				rs.getString("title"), rs.getString("body"), rs.getString("content_hash"),
+				""", new MapSqlParameterSource("model", model), (rs, n) -> new ItemText(rs.getInt("number"),
+				rs.getString("kind"), rs.getString("title"), rs.getString("body"), rs.getString("content_hash"),
 				rs.getString("pr_base_branch")));
 	}
 

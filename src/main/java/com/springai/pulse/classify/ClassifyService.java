@@ -17,6 +17,7 @@
 package com.springai.pulse.classify;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -26,11 +27,16 @@ import java.util.concurrent.atomic.AtomicLong;
 
 import com.springai.pulse.config.PulseProperties;
 import com.springai.pulse.domain.IssueClassification;
+import com.springai.pulse.domain.ItemType;
+import com.springai.pulse.domain.MainBranchApplicable;
+import com.springai.pulse.domain.ReviewComplexity;
+import com.springai.pulse.domain.Severity;
 import com.springai.pulse.persistence.ClassificationRepository;
 import com.springai.pulse.persistence.GhItemRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.springframework.ai.anthropic.AnthropicChatOptions;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.beans.factory.annotation.Value;
@@ -50,6 +56,10 @@ public class ClassifyService {
 			You triage GitHub issues and pull requests for the Spring AI project. Classify each item
 			STRICTLY from the provided title and body. Do not invent facts. If something is not stated,
 			leave providers/vectorStores empty and pick the closest area.
+
+			`type` must be exactly one of: BUG, ENHANCEMENT, QUESTION, DOCUMENTATION, TASK.
+			IMPROVEMENT and NEW_FEATURE are values of `enhancementKind` only — never of `type`;
+			an improvement to an existing feature is type=ENHANCEMENT with enhancementKind=IMPROVEMENT.
 
 			`area` must be exactly one of (lower-kebab-case):
 			core, chat-client, chat-model, embedding, vector-store, rag, tool-calling, mcp,
@@ -114,14 +124,31 @@ public class ClassifyService {
 	 * @return the number successfully classified
 	 */
 	public int classifyPending(int limit) {
-		List<GhItemRepository.ItemText> all = this.items.findNeedingClassification();
+		return classifyPendingForModel(this.model, limit, false);
+	}
+
+	/**
+	 * Classify pending items with the second-opinion Sonnet model, capped at {@code limit}
+	 * (0 = no cap). Items are taken in random order so a capped run is an unbiased sample for
+	 * the model-comparison view rather than the oldest-N items.
+	 * @return the number successfully classified
+	 */
+	public int classifyPendingSonnet(int limit) {
+		return classifyPendingForModel(this.props.classify().sonnetModel(), limit, true);
+	}
+
+	private int classifyPendingForModel(String modelId, int limit, boolean randomOrder) {
+		List<GhItemRepository.ItemText> all = new ArrayList<>(this.items.findNeedingClassification(modelId));
+		if (randomOrder) {
+			Collections.shuffle(all);
+		}
 		final List<GhItemRepository.ItemText> pending = (limit > 0 && all.size() > limit) ? all.subList(0, limit) : all;
 		if (pending.isEmpty()) {
-			logger.info("Classification: nothing to do (all items current)");
+			logger.info("Classification ({}): nothing to do (all items current)", modelId);
 			return 0;
 		}
 		int concurrency = Math.max(1, this.props.classify().concurrency());
-		logger.info("Classifying {} item(s) with {} @ concurrency {}", pending.size(), this.model, concurrency);
+		logger.info("Classifying {} item(s) with {} @ concurrency {}", pending.size(), modelId, concurrency);
 		ExecutorService pool = Executors.newFixedThreadPool(concurrency);
 		AtomicInteger ok = new AtomicInteger();
 		AtomicInteger failed = new AtomicInteger();
@@ -130,7 +157,8 @@ public class ClassifyService {
 		try {
 			List<Future<?>> futures = new ArrayList<>(pending.size());
 			for (GhItemRepository.ItemText item : pending) {
-				futures.add(pool.submit(() -> classifyOne(item, ok, failed, inTokens, outTokens, pending.size())));
+				futures.add(pool
+					.submit(() -> classifyOne(item, modelId, ok, failed, inTokens, outTokens, pending.size())));
 			}
 			for (Future<?> f : futures) {
 				try {
@@ -144,15 +172,15 @@ public class ClassifyService {
 		finally {
 			pool.shutdown();
 		}
-		double cost = costUsd(this.model, inTokens.get(), outTokens.get());
+		double cost = costUsd(modelId, inTokens.get(), outTokens.get());
 		logger.info("Classification complete: {} ok, {} failed of {}; tokens in={} out={}; est cost ${} ({})",
 				ok.get(), failed.get(), pending.size(), inTokens.get(), outTokens.get(),
-				String.format("%.4f", cost), this.model);
+				String.format("%.4f", cost), modelId);
 		return ok.get();
 	}
 
-	private void classifyOne(GhItemRepository.ItemText item, AtomicInteger ok, AtomicInteger failed, AtomicLong inTokens,
-			AtomicLong outTokens, int total) {
+	private void classifyOne(GhItemRepository.ItemText item, String modelId, AtomicInteger ok, AtomicInteger failed,
+			AtomicLong inTokens, AtomicLong outTokens, int total) {
 		try {
 			String body = item.body() != null ? item.body() : "";
 			int max = this.props.classify().maxBodyChars();
@@ -166,14 +194,19 @@ public class ClassifyService {
 				user.append("Base branch: ").append(item.prBaseBranch()).append("\n");
 			}
 			user.append("Title: ").append(item.title()).append("\n\nBody:\n").append(body);
-			var response = this.chat.prompt().system(SYSTEM).user(user.toString()).call().responseEntity(IssueClassification.class);
+			var prompt = this.chat.prompt().system(SYSTEM).user(user.toString());
+			if (!modelId.equals(this.model)) {
+				// Spring AI 2.0 ChatClient takes the options *builder* per-call
+				prompt = prompt.options(AnthropicChatOptions.builder().model(modelId));
+			}
+			var response = prompt.call().responseEntity(IssueClassification.class);
 			IssueClassification result = response.getEntity();
 			accumulateUsage(response.getResponse(), inTokens, outTokens);
 			if (result == null) {
 				failed.incrementAndGet();
 				return;
 			}
-			this.classifications.upsert(item.number(), result, this.model, item.contentHash());
+			this.classifications.upsert(item.number(), sanitize(result, item), modelId, item.contentHash());
 			int done = ok.incrementAndGet() + failed.get();
 			if (done % 50 == 0) {
 				logger.info("  ...classified {}/{}", done, total);
@@ -183,6 +216,71 @@ public class ClassifyService {
 			failed.incrementAndGet();
 			logger.warn("Classify failed for #{}: {}", item.number(), ex.getMessage());
 		}
+	}
+
+	/** The area taxonomy from the prompt. {@code area} is a free string in the schema, so the
+	 * model can emit anything — including, via prompt injection from issue bodies, markup that
+	 * downstream HTML sinks must never see. Everything outside the taxonomy becomes 'other'. */
+	private static final java.util.Set<String> AREAS = java.util.Set.of("core", "chat-client", "chat-model",
+			"embedding", "vector-store", "rag", "tool-calling", "mcp", "observability", "chat-memory",
+			"structured-output", "agents", "advisors", "prompt", "image", "audio", "moderation", "auto-config",
+			"docs", "testing", "build", "kotlin", "other", "unknown");
+
+	/** Branches where a PR's main-branch-applicability question is moot (it IS main/2.x). */
+	private static final java.util.regex.Pattern ACTIVE_BRANCH = java.util.regex.Pattern.compile("main|2\\..*");
+
+	/** LOW review complexity requires a clear description; a body shorter than this has none. */
+	private static final int MIN_BODY_FOR_LOW_COMPLEXITY = 80;
+
+	/**
+	 * Deterministic post-processing of model output — every rule here is a rubric clause the
+	 * models were told but do not reliably honor (each found via adjudicated Haiku-vs-Sonnet
+	 * comparison, and the body-length one is a blind spot BOTH models share):
+	 * <ul>
+	 * <li>Severity: enhancements and documentation gaps are never higher than LOW.</li>
+	 * <li>Area: normalized to the taxonomy whitelist, anything else → 'other'.</li>
+	 * <li>PR review complexity: never LOW when the body is blank/near-blank — LOW requires a
+	 * clear description, and "no information" is not "simple".</li>
+	 * <li>Main-branch applicability: forced NOT_APPLICABLE for PRs already targeting
+	 * main/2.x.</li>
+	 * </ul>
+	 */
+	private static IssueClassification sanitize(IssueClassification c, GhItemRepository.ItemText item) {
+		String area = c.area() == null ? "unknown" : c.area().trim().toLowerCase();
+		if (!AREAS.contains(area)) {
+			area = "other";
+		}
+		Severity severity = c.severity();
+		boolean capped = c.type() == ItemType.ENHANCEMENT || c.type() == ItemType.DOCUMENTATION;
+		if (capped && severity != null && severity != Severity.LOW) {
+			severity = Severity.LOW;
+		}
+		ReviewComplexity rc = c.reviewComplexity();
+		MainBranchApplicable mba = c.mainBranchApplicable();
+		String mbaNote = c.mainBranchNote();
+		if ("pr".equalsIgnoreCase(item.kind())) {
+			String body = item.body() == null ? "" : item.body().trim();
+			if (rc == ReviewComplexity.LOW && body.length() < MIN_BODY_FOR_LOW_COMPLEXITY) {
+				rc = ReviewComplexity.MEDIUM;
+			}
+			String base = item.prBaseBranch();
+			if (base != null && ACTIVE_BRANCH.matcher(base).matches()
+					&& mba != null && mba != MainBranchApplicable.NOT_APPLICABLE) {
+				mba = MainBranchApplicable.NOT_APPLICABLE;
+				mbaNote = "";
+			}
+		}
+		else {
+			if (rc != null && rc != ReviewComplexity.NOT_APPLICABLE) {
+				rc = ReviewComplexity.NOT_APPLICABLE;
+			}
+			if (mba != null && mba != MainBranchApplicable.NOT_APPLICABLE) {
+				mba = MainBranchApplicable.NOT_APPLICABLE;
+				mbaNote = "";
+			}
+		}
+		return new IssueClassification(c.type(), c.enhancementKind(), area, c.providers(), c.vectorStores(),
+				severity, c.goodFirstIssue(), c.summary(), rc, c.reviewNotes(), mba, mbaNote);
 	}
 
 	private static void accumulateUsage(org.springframework.ai.chat.model.ChatResponse response, AtomicLong inTokens,
