@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { fetchItems, type ItemView } from '../api'
+import { fetchItems, fetchSemanticSearch, type ItemView, type SemanticHit } from '../api'
 
 const KIND_ICON: Record<string, string> = { issue: '◎', pr: '⇄' }
 
@@ -21,6 +21,8 @@ interface Props {
 export function ItemDrawer({ title, subtitle, items: preloaded, filter, onClose }: Props) {
   const [items, setItems] = useState<ItemView[]>(preloaded ?? [])
   const [loading, setLoading] = useState(!preloaded)
+  // null = loading / not applicable; [] = no neighbors above threshold
+  const [similar, setSimilar] = useState<SemanticHit[] | null>(null)
   const panelRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -30,6 +32,21 @@ export function ItemDrawer({ title, subtitle, items: preloaded, filter, onClose 
       .finally(() => setLoading(false))
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // Single-item detail view: surface semantic nearest neighbors — the item's title+summary
+  // is the query, matched by meaning against the whole backlog (vector similarity).
+  const single = !loading && items.length === 1 ? items[0] : null
+  useEffect(() => {
+    if (!single) {
+      setSimilar(null)
+      return
+    }
+    const q = `${single.title}. ${single.summary ?? ''}`.trim()
+    fetchSemanticSearch({ q, limit: 8 })
+      .then(hits => setSimilar(hits.filter(h => h.number !== single.number).slice(0, 5)))
+      .catch(() => setSimilar([]))
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [single?.number])
 
   // Lock background scroll
   useEffect(() => {
@@ -122,6 +139,41 @@ export function ItemDrawer({ title, subtitle, items: preloaded, filter, onClose 
                 </li>
               ))}
             </ul>
+          )}
+
+          {/* Semantic nearest neighbors (single-item view only) */}
+          {single && (
+            <div className="border-t border-edge px-5 py-4">
+              <h4 className="mb-2 text-[11px] uppercase tracking-wide text-subtle">
+                ≈ Similar items <span className="normal-case">· by meaning · AI-suggested</span>
+              </h4>
+              {similar === null ? (
+                <p className="text-[12px] text-subtle">Finding similar items…</p>
+              ) : similar.length === 0 ? (
+                <p className="text-[12px] text-subtle">Nothing semantically close in the open backlog.</p>
+              ) : (
+                <ul className="space-y-2">
+                  {similar.map(s => (
+                    <li key={s.number} className="flex items-start gap-2 text-[12px]">
+                      <span className="shrink-0 rounded bg-primary/10 px-1.5 py-0.5 text-[11px] tabular-nums text-accent">
+                        {Math.round(s.similarity * 100)}%
+                      </span>
+                      <span className="shrink-0 text-subtle">{KIND_ICON[s.kind] ?? '○'} #{s.number}</span>
+                      <a
+                        href={s.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="min-w-0 flex-1 truncate text-accent hover:underline"
+                        title={s.title}
+                      >
+                        {s.title}
+                      </a>
+                      {s.area && <span className="shrink-0 text-[11px] text-subtle">{s.area}</span>}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
           )}
         </div>
 

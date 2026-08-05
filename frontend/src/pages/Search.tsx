@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
-import { fetchItems, type ItemView } from '../api'
+import { fetchItems, fetchSemanticSearch, type ItemView, type SemanticHit } from '../api'
 import { ItemDrawer } from '../components/ItemDrawer'
+
+type SearchMode = 'keyword' | 'semantic'
+type ResultRow = ItemView & { similarity?: number }
 
 const TYPES = ['BUG', 'ENHANCEMENT', 'QUESTION', 'DOCUMENTATION', 'TASK']
 const SEVERITIES = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW']
@@ -40,12 +43,13 @@ function Chip({ label, active, onClick }: { label: string; active: boolean; onCl
 }
 
 export function Search({ model }: { model?: string } = {}) {
+  const [mode, setMode] = useState<SearchMode>('keyword')
   const [query, setQuery] = useState('')
   const [kind, setKind] = useState<'issue' | 'pr' | ''>('')
   const [type, setType] = useState('')
   const [area, setArea] = useState('')
   const [severity, setSeverity] = useState('')
-  const [results, setResults] = useState<ItemView[]>([])
+  const [results, setResults] = useState<ResultRow[]>([])
   const [loading, setLoading] = useState(false)
   const [searched, setSearched] = useState(false)
   const [drawer, setDrawer] = useState<ItemView[] | null>(null)
@@ -53,7 +57,9 @@ export function Search({ model }: { model?: string } = {}) {
 
   const hasFilters = !!query || !!kind || !!type || !!area || !!severity
 
+  // keyword mode: debounced search-as-you-type
   useEffect(() => {
+    if (mode !== 'keyword') return
     if (!hasFilters) {
       setResults([])
       setSearched(false)
@@ -76,7 +82,40 @@ export function Search({ model }: { model?: string } = {}) {
         .finally(() => setLoading(false))
     }, 300)
     return () => { if (debounceRef.current) clearTimeout(debounceRef.current) }
-  }, [query, kind, type, area, severity, hasFilters, model])
+  }, [mode, query, kind, type, area, severity, hasFilters, model])
+
+  // semantic mode: Enter-triggered (embedding per keystroke is wasteful); filters re-apply live
+  async function runSemantic() {
+    if (!query.trim()) return
+    setLoading(true)
+    try {
+      const r: SemanticHit[] = await fetchSemanticSearch({
+        q: query.trim(),
+        kind: kind || undefined,
+        type: type || undefined,
+        area: area || undefined,
+        severity: severity || undefined,
+        limit: 30,
+      })
+      setResults(r)
+      setSearched(true)
+    } catch {
+      /* keep previous results */
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    if (mode === 'semantic' && searched && query.trim()) runSemantic()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [kind, type, area, severity])
+
+  function switchMode(m: SearchMode) {
+    setMode(m)
+    setResults([])
+    setSearched(false)
+  }
 
   function clear() {
     setQuery(''); setKind(''); setType(''); setArea(''); setSeverity('')
@@ -85,23 +124,45 @@ export function Search({ model }: { model?: string } = {}) {
 
   return (
     <div className="space-y-4">
-      {/* Search box */}
-      <div className="relative">
-        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-subtle text-[14px]">⌕</span>
-        <input
-          autoFocus
-          type="text"
-          value={query}
-          onChange={e => setQuery(e.target.value)}
-          placeholder="Search titles and summaries…"
-          className="w-full rounded-lg border border-edge bg-surface pl-8 pr-10 py-2.5 text-[14px] placeholder:text-subtle focus:outline-none focus:border-primary"
-        />
-        {hasFilters && (
+      {/* Search box + mode toggle */}
+      <div className="flex items-center gap-2">
+        <div className="relative flex-1">
+          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-subtle text-[14px]">
+            {mode === 'keyword' ? '⌕' : '≈'}
+          </span>
+          <input
+            autoFocus
+            type="text"
+            value={query}
+            onChange={e => setQuery(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter' && mode === 'semantic') runSemantic() }}
+            placeholder={mode === 'keyword'
+              ? 'Search titles and summaries…'
+              : 'Describe what you\'re looking for in plain words, then press Enter…'}
+            className="w-full rounded-lg border border-edge bg-surface pl-8 pr-10 py-2.5 text-[14px] placeholder:text-subtle focus:outline-none focus:border-primary"
+          />
+          {hasFilters && (
+            <button
+              onClick={clear}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-subtle hover:text-body text-[16px]"
+            >×</button>
+          )}
+        </div>
+        <div className="flex shrink-0 rounded-lg border border-edge overflow-hidden text-[12px]"
+             title="Keyword matches exact text; Semantic matches by meaning (vector similarity), even with zero keyword overlap.">
           <button
-            onClick={clear}
-            className="absolute right-3 top-1/2 -translate-y-1/2 text-subtle hover:text-body text-[16px]"
-          >×</button>
-        )}
+            onClick={() => switchMode('keyword')}
+            className={`px-3 py-2.5 transition-colors ${mode === 'keyword' ? 'bg-primary text-white' : 'text-subtle hover:text-body hover:bg-surface'}`}
+          >
+            ⌕ Keyword
+          </button>
+          <button
+            onClick={() => switchMode('semantic')}
+            className={`px-3 py-2.5 border-l border-edge transition-colors ${mode === 'semantic' ? 'bg-primary text-white' : 'text-subtle hover:text-body hover:bg-surface'}`}
+          >
+            ≈ Semantic
+          </button>
+        </div>
       </div>
 
       {/* Filter chips */}
@@ -151,6 +212,7 @@ export function Search({ model }: { model?: string } = {}) {
                   <th className="px-3 py-2">#</th>
                   <th className="px-3 py-2">Kind</th>
                   <th className="px-3 py-2">Title</th>
+                  {mode === 'semantic' && <th className="px-3 py-2">Match</th>}
                   <th className="px-3 py-2">Type</th>
                   <th className="px-3 py-2">Area</th>
                   <th className="px-3 py-2">Severity</th>
@@ -170,6 +232,13 @@ export function Search({ model }: { model?: string } = {}) {
                       <span className="line-clamp-1 font-medium">{item.title}</span>
                       {item.summary && <p className="text-[11px] text-subtle mt-0.5 line-clamp-1">{item.summary}</p>}
                     </td>
+                    {mode === 'semantic' && (
+                      <td className="px-3 py-2.5 text-[12px] whitespace-nowrap">
+                        <span className="rounded bg-primary/10 px-1.5 py-0.5 text-[11px] tabular-nums text-accent">
+                          {Math.round((item.similarity ?? 0) * 100)}%
+                        </span>
+                      </td>
+                    )}
                     <td className="px-3 py-2.5 text-[11px]">
                       {item.type && (
                         <span className={`rounded px-1.5 py-0.5 ${TYPE_CLS[item.type] ?? 'text-subtle'}`}>
@@ -198,7 +267,9 @@ export function Search({ model }: { model?: string } = {}) {
 
       {!loading && !searched && (
         <div className="py-16 text-center text-subtle text-[13px]">
-          Type a keyword or pick a filter above to search the backlog.
+          {mode === 'keyword'
+            ? 'Type a keyword or pick a filter above to search the backlog.'
+            : <>Describe the problem in your own words — e.g. <em>"issues about streaming tool calls hanging"</em> — and press Enter. Matches by meaning, not keywords.</>}
         </div>
       )}
 

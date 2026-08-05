@@ -125,6 +125,33 @@ export async function fetchItems(params?: {
   return r.json()
 }
 
+/** ItemView plus the vector-similarity score (0..1). */
+export interface SemanticHit extends ItemView {
+  similarity: number
+}
+
+// MVP 7 — search by meaning: the query is embedded server-side (local ONNX) and matched
+// against stored item vectors via VectorStore.similaritySearch.
+export async function fetchSemanticSearch(params: {
+  q: string
+  kind?: string
+  type?: string
+  area?: string
+  severity?: string
+  limit?: number
+}): Promise<SemanticHit[]> {
+  const q = new URLSearchParams()
+  q.set('q', params.q)
+  if (params.kind) q.set('kind', params.kind)
+  if (params.type) q.set('type', params.type)
+  if (params.area) q.set('area', params.area)
+  if (params.severity) q.set('severity', params.severity)
+  q.set('limit', String(params.limit ?? 30))
+  const r = await fetch(`/api/semantic-search?${q}`)
+  if (!r.ok) throw new Error(`semantic-search: ${r.status}`)
+  return r.json()
+}
+
 export async function fetchBackfillStatus(): Promise<BackfillStatus> {
   const r = await fetch('/api/backfill/status')
   if (!r.ok) throw new Error(`status: ${r.status}`)

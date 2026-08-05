@@ -29,6 +29,7 @@ import com.springai.pulse.config.PulseProperties;
 import com.springai.pulse.domain.ModelIds;
 import com.springai.pulse.persistence.ItemLinkRepository;
 import com.springai.pulse.persistence.ReadModelRepository;
+import com.springai.pulse.search.SemanticSearchService;
 
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -54,13 +55,29 @@ public class DashboardController {
 
 	private final PulseProperties props;
 
+	private final SemanticSearchService semanticSearch;
+
 	public DashboardController(ReadModelRepository readModel, AnalyticsRepository analytics,
-			ClusterRepository clusterRepo, ItemLinkRepository links, PulseProperties props) {
+			ClusterRepository clusterRepo, ItemLinkRepository links, PulseProperties props,
+			SemanticSearchService semanticSearch) {
 		this.readModel = readModel;
 		this.analytics = analytics;
 		this.clusterRepo = clusterRepo;
 		this.links = links;
 		this.props = props;
+		this.semanticSearch = semanticSearch;
+	}
+
+	@GetMapping("/semantic-search")
+	public List<SemanticSearchService.SemanticHit> semanticSearch(@RequestParam String q,
+			@RequestParam(required = false) String kind, @RequestParam(required = false) String type,
+			@RequestParam(required = false) String area, @RequestParam(required = false) String severity,
+			@RequestParam(defaultValue = "30") int limit) {
+		if (q == null || q.isBlank()) {
+			return List.of();
+		}
+		return this.semanticSearch.search(q.trim(), kind, type, area, severity,
+				Math.min(Math.max(limit, 1), 100));
 	}
 
 	@GetMapping("/facets")
