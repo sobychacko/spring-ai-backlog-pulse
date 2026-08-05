@@ -3,12 +3,15 @@ import {
   fetchBackfillStatus,
   fetchFacets,
   fetchSyncStatus,
+  hasAdminToken,
+  setAdminToken,
   triggerBackfill,
   triggerCluster,
   triggerEmbed,
   triggerIngest,
   triggerIngestPrBranches,
   triggerScanDuplicates,
+  triggerSonnetClassify,
   triggerSync,
   type Facets,
 } from './api'
@@ -23,15 +26,24 @@ import { ValueQueue } from './pages/ValueQueue'
 
 type Tab = 'overview' | 'facet' | 'pulse' | 'value' | 'theme-map' | 'duplicates' | 'prs' | 'search'
 
-const TABS: { id: Tab; label: string }[] = [
-  { id: 'overview',   label: 'Overview' },
-  { id: 'facet',      label: 'By Facet' },
-  { id: 'pulse',      label: 'Backlog Pulse' },
-  { id: 'value',      label: 'Value Queue' },
-  { id: 'theme-map',  label: 'Theme Map' },
-  { id: 'duplicates', label: 'Duplicate Review' },
-  { id: 'prs',        label: 'PR Review' },
-  { id: 'search',     label: 'Search' },
+// Per-tab accent + glyph. `active` must be literal class strings so Tailwind's JIT sees them.
+const TABS: { id: Tab; label: string; icon: string; active: string }[] = [
+  { id: 'overview',   label: 'Overview',         icon: '◉',
+    active: 'text-sky-300 bg-sky-400/10 border-sky-400/40 shadow-[0_0_16px_-4px_rgba(56,189,248,0.6)]' },
+  { id: 'facet',      label: 'By Facet',         icon: '▤',
+    active: 'text-violet-300 bg-violet-400/10 border-violet-400/40 shadow-[0_0_16px_-4px_rgba(167,139,250,0.6)]' },
+  { id: 'pulse',      label: 'Backlog Pulse',    icon: '⌁',
+    active: 'text-amber-300 bg-amber-400/10 border-amber-400/40 shadow-[0_0_16px_-4px_rgba(251,191,36,0.6)]' },
+  { id: 'value',      label: 'Value Queue',      icon: '◎',
+    active: 'text-emerald-300 bg-emerald-400/10 border-emerald-400/40 shadow-[0_0_16px_-4px_rgba(52,211,153,0.6)]' },
+  { id: 'theme-map',  label: 'Theme Map',        icon: '⬡',
+    active: 'text-fuchsia-300 bg-fuchsia-400/10 border-fuchsia-400/40 shadow-[0_0_16px_-4px_rgba(232,121,249,0.6)]' },
+  { id: 'duplicates', label: 'Duplicates', icon: '⧉',
+    active: 'text-cyan-300 bg-cyan-400/10 border-cyan-400/40 shadow-[0_0_16px_-4px_rgba(34,211,238,0.6)]' },
+  { id: 'prs',        label: 'PR Review',        icon: '⎇',
+    active: 'text-orange-300 bg-orange-400/10 border-orange-400/40 shadow-[0_0_16px_-4px_rgba(251,146,60,0.6)]' },
+  { id: 'search',     label: 'Search',           icon: '⌕',
+    active: 'text-indigo-300 bg-indigo-400/10 border-indigo-400/40 shadow-[0_0_16px_-4px_rgba(129,140,248,0.6)]' },
 ]
 
 export default function App() {
@@ -44,6 +56,8 @@ export default function App() {
   const [syncRunning, setSyncRunning] = useState(false)
   const [lastSyncedAt, setLastSyncedAt] = useState<string>('')
   const [adminOpen, setAdminOpen] = useState(false)
+  // bumped by the Refresh button; remounts the active page so it refetches its own data
+  const [refreshKey, setRefreshKey] = useState(0)
   const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const loadFacets = useCallback(async () => {
@@ -62,7 +76,9 @@ export default function App() {
     try {
       const s = await fetchBackfillStatus()
       setBackfillRunning(s.running)
-      setStatus(s.running ? 'Backfill running…' : (s.lastResult ?? ''))
+      // 'never run' guard: older backend builds report that placeholder before any run
+      const last = s.lastResult && s.lastResult !== 'never run' ? s.lastResult : ''
+      setStatus(s.running ? 'Backfill running…' : last)
       if (s.running) {
         pollRef.current = setTimeout(async () => {
           await loadFacets()
@@ -172,28 +188,72 @@ export default function App() {
     }
   }
 
+  function handleSetAdminToken() {
+    setAdminOpen(false)
+    const token = window.prompt(
+      'Admin token (required for admin actions on a deployed instance; leave empty to clear):',
+    )
+    if (token == null) return
+    setAdminToken(token.trim())
+    setStatus(token.trim() ? 'Admin token saved (this browser only)' : 'Admin token cleared')
+  }
+
+  async function handleSonnetClassify() {
+    setAdminOpen(false)
+    const input = window.prompt(
+      'Classify how many items with Sonnet? This is metered (~3x Haiku rates).\n' +
+      '200 ≈ $2.50 comparison sample · 0 = all pending (full backlog ≈ $18)',
+      '200',
+    )
+    if (input == null) return
+    const limit = Number.parseInt(input, 10)
+    if (Number.isNaN(limit) || limit < 0) {
+      setStatus('Sonnet classify cancelled: invalid limit')
+      return
+    }
+    setStatus(`Classifying ${limit === 0 ? 'all pending' : limit} item(s) with Sonnet…`)
+    try {
+      const r = await triggerSonnetClassify(limit)
+      setStatus(`Sonnet classified ${r.classified} item(s)`)
+    } catch (e) {
+      setStatus(`Sonnet classify error: ${e}`)
+    }
+  }
+
   return (
     <div className="flex min-h-full flex-col bg-base text-body">
-      {/* Header */}
-      <header className="border-b border-edge px-6 py-3">
+      {/* Header — projected off the page: deep blue→violet gradient, glow seam, drop shadow */}
+      <header className="sticky top-0 z-40 bg-gradient-to-r from-[#0b1526]/95 via-[#111b36]/95 to-[#1a1130]/95 px-6 py-3 shadow-[0_10px_30px_-12px_rgba(76,110,245,0.35)] backdrop-blur">
+        {/* accent seam along the bottom edge */}
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 h-px bg-gradient-to-r from-sky-500/70 via-violet-500/60 to-fuchsia-500/40" />
         <div className="mx-auto flex max-w-screen-xl items-center justify-between gap-4">
           <div className="flex items-center gap-4">
-            <h1 className="text-[15px] font-semibold">
+            <h1 className="flex items-center gap-2 text-[15px] font-semibold whitespace-nowrap">
+              {/* live-system pulse dot */}
+              <span className="relative flex h-2 w-2">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-60" />
+                <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-400" />
+              </span>
               Spring AI{' '}
-              <span className="font-normal text-subtle">Backlog Pulse</span>
+              <span className="bg-gradient-to-r from-sky-300 to-violet-300 bg-clip-text font-medium text-transparent">
+                Backlog Pulse
+              </span>
             </h1>
-            {/* Tab nav */}
-            <nav className="flex gap-1">
+            {/* Tab nav — recessed console strip, per-tab accent glow */}
+            <nav className="flex gap-0.5 rounded-lg border border-edge/70 bg-black/40 p-1">
               {TABS.map((t) => (
                 <button
                   key={t.id}
                   onClick={() => setTab(t.id)}
-                  className={`rounded-md px-3 py-1.5 text-[13px] transition-colors ${
+                  className={`flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-[12.5px] whitespace-nowrap transition-all duration-150 ${
                     tab === t.id
-                      ? 'bg-primary text-white'
-                      : 'text-subtle hover:text-body hover:bg-surface'
+                      ? `font-medium ${t.active}`
+                      : 'border-transparent text-subtle hover:bg-white/5 hover:text-body'
                   }`}
                 >
+                  <span className={`text-[11px] leading-none ${tab === t.id ? '' : 'opacity-50'}`} aria-hidden>
+                    {t.icon}
+                  </span>
                   {t.label}
                 </button>
               ))}
@@ -210,7 +270,7 @@ export default function App() {
               <span className="text-[12px] text-subtle">{status}</span>
             )}
             <button
-              onClick={loadFacets}
+              onClick={() => { setRefreshKey(k => k + 1); loadFacets() }}
               className="rounded-md border border-edge px-3 py-1.5 text-[13px] text-subtle hover:text-body hover:bg-surface transition-colors"
             >
               Refresh
@@ -246,6 +306,12 @@ export default function App() {
                     {syncRunning ? 'Syncing…' : 'Sync (incremental)'}
                   </button>
                   <button
+                    onClick={handleSonnetClassify}
+                    className="block w-full px-4 py-2.5 text-left text-[13px] hover:bg-[#21262d]"
+                  >
+                    Classify with Sonnet
+                  </button>
+                  <button
                     onClick={handleIngestPrBranches}
                     className="block w-full px-4 py-2.5 text-left text-[13px] hover:bg-[#21262d]"
                   >
@@ -266,9 +332,16 @@ export default function App() {
                   </button>
                   <button
                     onClick={handleCluster}
-                    className="block w-full px-4 py-2.5 text-left text-[13px] hover:bg-[#21262d] rounded-b-lg"
+                    className="block w-full px-4 py-2.5 text-left text-[13px] hover:bg-[#21262d]"
                   >
                     Build theme clusters
+                  </button>
+                  <div className="my-1 border-t border-edge" />
+                  <button
+                    onClick={handleSetAdminToken}
+                    className="block w-full px-4 py-2.5 text-left text-[13px] hover:bg-[#21262d] rounded-b-lg text-subtle"
+                  >
+                    {hasAdminToken() ? 'Change admin token…' : 'Set admin token…'}
                   </button>
                 </div>
               )}
@@ -277,9 +350,9 @@ export default function App() {
         </div>
       </header>
 
-      {/* Main content */}
+      {/* Main content — keyed by refreshKey so Refresh remounts (and refetches) the active page */}
       <main className="flex-1 px-6 py-6">
-        <div className="mx-auto max-w-screen-xl">
+        <div className="mx-auto max-w-screen-xl" key={refreshKey}>
           {loading ? (
             <div className="flex items-center justify-center py-24 text-subtle">
               Loading…

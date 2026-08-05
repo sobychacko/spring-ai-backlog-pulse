@@ -79,7 +79,7 @@ function WeightSlider({ label, value, effectivePct, onChange, color }: SliderPro
 
 // ── Main page ────────────────────────────────────────────────────────────────
 
-export function BacklogPulse() {
+export function BacklogPulse({ model }: { model?: string } = {}) {
   const [entries, setEntries] = useState<PulseEntry[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -91,11 +91,12 @@ export function BacklogPulse() {
   const [wEng, setWEng] = useState(30)
 
   useEffect(() => {
-    fetchPulse()
+    setLoading(true)
+    fetchPulse(model)
       .then(setEntries)
       .catch((e) => setError(String(e)))
       .finally(() => setLoading(false))
-  }, [])
+  }, [model])
 
   const total = wVol + wVel + wEng || 1
   const pVol = Math.round((wVol / total) * 100)

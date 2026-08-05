@@ -39,7 +39,7 @@ function Chip({ label, active, onClick }: { label: string; active: boolean; onCl
   )
 }
 
-export function Search() {
+export function Search({ model }: { model?: string } = {}) {
   const [query, setQuery] = useState('')
   const [kind, setKind] = useState<'issue' | 'pr' | ''>('')
   const [type, setType] = useState('')
@@ -69,13 +69,14 @@ export function Search() {
         area: area || undefined,
         severity: severity || undefined,
         limit: 200,
+        model,
       })
         .then(r => { setResults(r); setSearched(true) })
         .catch(() => {})
         .finally(() => setLoading(false))
     }, 300)
     return () => { if (debounceRef.current) clearTimeout(debounceRef.current) }
-  }, [query, kind, type, area, severity, hasFilters])
+  }, [query, kind, type, area, severity, hasFilters, model])
 
   function clear() {
     setQuery(''); setKind(''); setType(''); setArea(''); setSeverity('')

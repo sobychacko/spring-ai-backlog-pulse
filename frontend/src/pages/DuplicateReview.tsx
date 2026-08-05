@@ -1,27 +1,27 @@
 import { useEffect, useState } from 'react'
 import {
-  confirmDuplicate,
-  dismissDuplicate,
   fetchDuplicates,
   type DuplicateItemDetail,
   type DuplicatePair,
 } from '../api'
 
+// Read-only surface: the app proposes pairs, GitHub is where they get resolved.
+// Closing/merging either item clears the pair here on the next sync.
 const TYPE_LABELS: Record<string, { label: string; color: string; hint: string }> = {
   duplicate_candidate: {
     label: 'Possible duplicate',
     color: 'border-warn text-warn',
-    hint: 'Two issues about the same bug or request. Confirming marks the relationship — close one manually after review.',
+    hint: 'Two issues about the same bug or request. If truly duplicates, close one on GitHub — the pair disappears here after the next sync.',
   },
   competing_pr: {
     label: 'Competing PRs',
     color: 'border-accent text-accent',
-    hint: 'Two pull requests working on the same thing. Confirming notes the overlap for reviewers.',
+    hint: 'Two pull requests working on the same thing — worth knowing before reviewing either. Clears when one is closed or merged.',
   },
   pr_fixes_issue: {
     label: 'PR may fix issue',
     color: 'border-success text-success',
-    hint: 'The PR appears to address this issue. Confirming links them — do NOT close the issue, it will close when the PR merges.',
+    hint: 'The PR appears to address this issue. When the PR merges and closes the issue, the pair clears on its own.',
   },
   related: {
     label: 'Related',
@@ -65,59 +65,21 @@ function ItemPanel({ item }: { item: DuplicateItemDetail }) {
   )
 }
 
-function PairCard({
-  pair,
-  onAction,
-}: {
-  pair: DuplicatePair
-  onAction: (id: number, action: 'confirm' | 'dismiss') => void
-}) {
-  const [busy, setBusy] = useState(false)
+function PairCard({ pair }: { pair: DuplicatePair }) {
   const meta = TYPE_LABELS[pair.type] ?? { label: pair.type, color: 'border-edge text-subtle', hint: '' }
   const pct = Math.round(pair.confidence * 100)
-
-  async function handle(action: 'confirm' | 'dismiss') {
-    setBusy(true)
-    try {
-      if (action === 'confirm') await confirmDuplicate(pair.id)
-      else await dismissDuplicate(pair.id)
-      onAction(pair.id, action)
-    } catch (e) {
-      console.error(e)
-    } finally {
-      setBusy(false)
-    }
-  }
 
   return (
     <div className="rounded-lg border border-edge bg-surface p-4 space-y-3">
       {/* Header row */}
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex items-center gap-2 flex-wrap">
-          <span className={`rounded-full border px-2 py-0.5 text-[11px] ${meta.color}`}>{meta.label}</span>
-          <span className="rounded-full border border-edge px-2 py-0.5 text-[11px] text-subtle">
-            {pct}% similarity
-          </span>
-          <span className="rounded-full border border-edge px-2 py-0.5 text-[11px] text-subtle capitalize">
-            {pair.source === 'embedding' ? '⊕ embedding' : '⊙ GH ref'}
-          </span>
-        </div>
-        <div className="flex gap-2 shrink-0">
-          <button
-            onClick={() => handle('dismiss')}
-            disabled={busy}
-            className="rounded-md border border-edge px-2.5 py-1 text-[12px] text-subtle hover:text-body hover:bg-[#21262d] transition-colors disabled:opacity-50"
-          >
-            Dismiss
-          </button>
-          <button
-            onClick={() => handle('confirm')}
-            disabled={busy}
-            className="rounded-md bg-primary px-2.5 py-1 text-[12px] text-white hover:opacity-90 transition-opacity disabled:opacity-50"
-          >
-            Confirm
-          </button>
-        </div>
+      <div className="flex items-center gap-2 flex-wrap">
+        <span className={`rounded-full border px-2 py-0.5 text-[11px] ${meta.color}`}>{meta.label}</span>
+        <span className="rounded-full border border-edge px-2 py-0.5 text-[11px] text-subtle">
+          {pct}% similarity
+        </span>
+        <span className="rounded-full border border-edge px-2 py-0.5 text-[11px] text-subtle capitalize">
+          {pair.source === 'embedding' ? '⊕ embedding' : '⊙ GH ref'}
+        </span>
       </div>
 
       {/* Hint */}
@@ -163,11 +125,6 @@ export function DuplicateReview() {
       .finally(() => setLoading(false))
   }, [filter, offset])
 
-  function handleAction(id: number) {
-    setPairs((prev) => prev.filter((p) => p.id !== id))
-    setTotal((t) => Math.max(0, t - 1))
-  }
-
   function handleFilter(f: string) {
     setFilter(f)
     setOffset(0)
@@ -179,11 +136,13 @@ export function DuplicateReview() {
     <div className="space-y-4">
       {/* Header */}
       <div>
-        <h2 className="text-[15px] font-semibold">Duplicate Review</h2>
+        <h2 className="text-[15px] font-semibold">Duplicates</h2>
         <p className="mt-1 text-[12px] text-subtle">
-          Embedding-based candidates grouped by relationship type. Confirm or dismiss each pair.
-          Confirming a <em>PR fixes issue</em> pair only links them in the database — it does
-          <strong className="text-body"> not</strong> close the issue on GitHub.
+          AI-suggested candidate pairs, grouped by relationship type — only pairs where both
+          items are still open. This view is <strong className="text-body">read-only</strong>:
+          resolve true duplicates on GitHub (close one of the issues) and run{' '}
+          <strong className="text-body">Admin → Sync</strong> to clear resolved pairs. Nothing
+          here ever writes to GitHub.
         </p>
       </div>
 
@@ -202,7 +161,7 @@ export function DuplicateReview() {
             {f.label}
           </button>
         ))}
-        <span className="ml-auto self-center text-[12px] text-subtle">{total} pending</span>
+        <span className="ml-auto self-center text-[12px] text-subtle">{total} candidates</span>
       </div>
 
       {/* Pairs */}
@@ -210,7 +169,7 @@ export function DuplicateReview() {
         <div className="py-16 text-center text-subtle">Loading…</div>
       ) : pairs.length === 0 ? (
         <div className="py-16 text-center text-subtle">
-          No pending candidates.
+          No open candidates.
           {total === 0 && (
             <span className="block mt-1 text-[12px]">
               Run <strong>Admin → Embed items</strong> then <strong>Scan for duplicates</strong> to populate.
@@ -220,7 +179,7 @@ export function DuplicateReview() {
       ) : (
         <div className="space-y-3">
           {pairs.map((p) => (
-            <PairCard key={p.id} pair={p} onAction={handleAction} />
+            <PairCard key={p.id} pair={p} />
           ))}
         </div>
       )}

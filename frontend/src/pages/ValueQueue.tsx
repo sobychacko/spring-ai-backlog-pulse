@@ -104,17 +104,18 @@ function ValueCard({ item, rank }: { item: ValueItem; rank: number }) {
   )
 }
 
-export function ValueQueue() {
+export function ValueQueue({ model }: { model?: string } = {}) {
   const [items, setItems] = useState<ValueItem[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    fetchValue(25)
+    setLoading(true)
+    fetchValue(25, model)
       .then(setItems)
       .catch((e) => setError(String(e)))
       .finally(() => setLoading(false))
-  }, [])
+  }, [model])
 
   if (loading) return <div className="py-16 text-center text-subtle">Loading…</div>
   if (error) return <div className="rounded-lg border border-danger bg-surface p-4 text-danger">{error}</div>

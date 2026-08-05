@@ -57,6 +57,13 @@ function PrRow({ pr }: { pr: PrView }) {
         {ma && <span className={`ml-1 text-[11px] ${ma.cls}`}>{ma.label}</span>}
       </td>
       <td className="px-3 py-2.5 text-[12px] text-subtle whitespace-nowrap">{pr.author}</td>
+      <td className="px-3 py-2.5 text-[12px] whitespace-nowrap">
+        {pr.assignees.length > 0
+          ? <span className="text-body" title={pr.assignees.join(', ')}>
+              {pr.assignees[0]}{pr.assignees.length > 1 ? ` +${pr.assignees.length - 1}` : ''}
+            </span>
+          : <span className="text-subtle">—</span>}
+      </td>
       <td className="px-3 py-2.5 text-[12px] text-subtle whitespace-nowrap">{pr.daysSinceUpdate}d ago</td>
     </tr>
   )
@@ -94,6 +101,7 @@ function PrTable({ prs, sortOrder, emptyMsg }: { prs: PrView[]; sortOrder: SortO
               <th className="px-3 py-2">Notes</th>
               <th className="px-3 py-2">Branch</th>
               <th className="px-3 py-2">Author</th>
+              <th className="px-3 py-2">Assignee</th>
               <th className="px-3 py-2">Updated</th>
             </tr>
           </thead>
@@ -114,7 +122,7 @@ function PrTable({ prs, sortOrder, emptyMsg }: { prs: PrView[]; sortOrder: SortO
   )
 }
 
-export function PRReview() {
+export function PRReview({ model }: { model?: string } = {}) {
   const [prs, setPrs] = useState<PrView[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -122,21 +130,24 @@ export function PRReview() {
   const [sortOrder, setSortOrder] = useState<SortOrder>('hard-first')
 
   useEffect(() => {
-    fetchPRs()
+    setLoading(true)
+    fetchPRs(model)
       .then(setPrs)
       .catch(e => setError(String(e)))
       .finally(() => setLoading(false))
-  }, [])
+  }, [model])
 
   if (loading) return <div className="py-24 text-center text-subtle">Loading…</div>
   if (error) return <div className="rounded-lg border border-danger bg-surface p-4 text-danger">{error}</div>
 
   const nonDraft = prs.filter(p => !p.draft)
 
-  const sections: Record<SectionKey, { label: string; accent: string; emptyMsg: string; prs: PrView[] }> = {
+  const sections: Record<SectionKey, { label: string; accent: string; description: string; emptyMsg: string; prs: PrView[] }> = {
     'easy': {
       label: 'Easy to Review',
       accent: 'emerald',
+      description: 'PRs the AI judged low review complexity — narrow, well-described changes that are '
+        + 'easy to verify. Sorted by community engagement (reactions + comments).',
       emptyMsg: 'No low-complexity PRs — run Admin → Classify to populate review complexity.',
       prs: nonDraft
         .filter(p => p.reviewComplexity === 'LOW')
@@ -145,6 +156,8 @@ export function PRReview() {
     'old-branch': {
       label: 'Inactive Branches',
       accent: 'orange',
+      description: 'PRs targeting an inactive branch (anything other than main or 2.x, e.g. 1.0.x). '
+        + 'Each carries an AI verdict on whether the change also applies to main.',
       emptyMsg: 'No PRs targeting inactive branches.',
       prs: nonDraft
         .filter(p => isOldBranch(p.baseBranch))
@@ -153,6 +166,8 @@ export function PRReview() {
     'community': {
       label: 'Awaiting Review',
       accent: 'blue',
+      description: 'Community PRs (author is not a maintainer) with zero comments — still waiting '
+        + 'for a first response of any kind.',
       emptyMsg: 'No community PRs awaiting a first review.',
       prs: nonDraft
         .filter(p => p.comments === 0 &&
@@ -162,9 +177,11 @@ export function PRReview() {
     'stale': {
       label: 'Stale',
       accent: 'yellow',
-      emptyMsg: 'No stale PRs (nothing untouched for 30+ days).',
+      description: 'PRs with no GitHub activity of any kind (comments, pushes, labels, reviews) '
+        + 'for more than 90 days. Oldest first.',
+      emptyMsg: 'No stale PRs (nothing untouched for 90+ days).',
       prs: nonDraft
-        .filter(p => p.daysSinceUpdate > 30)
+        .filter(p => p.daysSinceUpdate > 90)
         .sort((a, b) => b.daysSinceUpdate - a.daysSinceUpdate),
     },
   }
@@ -217,7 +234,7 @@ export function PRReview() {
           <button
             key={key}
             onClick={() => setActiveTab(key)}
-            className={`rounded-lg border p-4 text-left transition-all ${
+            className={`group relative rounded-lg border p-4 text-left transition-all ${
               activeTab === key
                 ? `border-${s.accent}-500 bg-${s.accent}-400/5`
                 : 'border-edge bg-surface hover:border-subtle'
@@ -236,6 +253,12 @@ export function PRReview() {
             {activeTab === key && (
               <div className={`mt-2 h-0.5 w-full rounded ${`bg-${s.accent}-500`}`} />
             )}
+            <div
+              role="tooltip"
+              className="pointer-events-none invisible absolute left-1/2 top-full z-20 mt-2 w-72 -translate-x-1/2 rounded-md border border-edge bg-[#161b22] p-2.5 text-[11px] font-normal leading-relaxed text-subtle opacity-0 shadow-xl transition-opacity delay-150 group-hover:visible group-hover:opacity-100"
+            >
+              {s.description}
+            </div>
           </button>
         ))}
       </div>

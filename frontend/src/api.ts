@@ -1,3 +1,47 @@
+// MVP 6 — dual-model classification. The dashboard reads one model's classification rows at a
+// time; App sets the active model here so every fetch (including drawers) uses it. An explicit
+// `model` argument always wins over this default. The server defaults to Haiku when omitted.
+export type ModelId = 'claude-haiku-4-5' | 'claude-sonnet-4-6'
+
+let activeModel: string | undefined
+
+export function setActiveModel(model: string) {
+  activeModel = model
+}
+
+function modelParam(q: URLSearchParams, model?: string) {
+  const m = model ?? activeModel
+  if (m) q.set('model', m)
+  return q
+}
+
+// Admin token — required by the backend on all non-GET /api calls when PULSE_ADMIN_TOKEN is
+// set (deployed mode). Stored in localStorage; sent as X-Admin-Token (custom header ⇒ CORS
+// preflight ⇒ cross-site drive-by POSTs die at the browser).
+const ADMIN_TOKEN_KEY = 'pulse-admin-token'
+
+export function setAdminToken(token: string) {
+  if (token) localStorage.setItem(ADMIN_TOKEN_KEY, token)
+  else localStorage.removeItem(ADMIN_TOKEN_KEY)
+}
+
+export function hasAdminToken(): boolean {
+  return !!localStorage.getItem(ADMIN_TOKEN_KEY)
+}
+
+/** POST with the admin token attached; throws a helpful error on 401. */
+async function post(url: string): Promise<Response> {
+  const token = localStorage.getItem(ADMIN_TOKEN_KEY)
+  const r = await fetch(url, {
+    method: 'POST',
+    headers: token ? { 'X-Admin-Token': token } : {},
+  })
+  if (r.status === 401) {
+    throw new Error('unauthorized — set the admin token via Admin → Set admin token')
+  }
+  return r
+}
+
 export interface FacetCount {
   key: string
   count: number
@@ -39,8 +83,9 @@ export interface BackfillStatus {
   lastResult: string | null
 }
 
-export async function fetchFacets(): Promise<Facets> {
-  const r = await fetch('/api/facets')
+export async function fetchFacets(model?: string): Promise<Facets> {
+  const q = modelParam(new URLSearchParams(), model)
+  const r = await fetch(`/api/facets?${q}`)
   if (!r.ok) throw new Error(`facets: ${r.status}`)
   return r.json()
 }
@@ -59,8 +104,9 @@ export async function fetchItems(params?: {
   kind?: string
   search?: string
   limit?: number
+  model?: string
 }): Promise<ItemView[]> {
-  const q = new URLSearchParams()
+  const q = modelParam(new URLSearchParams(), params?.model)
   if (params?.type) q.set('type', params.type)
   if (params?.area) q.set('area', params.area)
   if (params?.weekOf) q.set('weekOf', params.weekOf)
@@ -86,30 +132,30 @@ export async function fetchBackfillStatus(): Promise<BackfillStatus> {
 }
 
 export async function triggerIngest(): Promise<{ ingested: number }> {
-  const r = await fetch('/api/ingest', { method: 'POST' })
+  const r = await post('/api/ingest')
   if (!r.ok) throw new Error(`ingest: ${r.status}`)
   return r.json()
 }
 
 export async function triggerBackfill(): Promise<void> {
-  const r = await fetch('/api/backfill', { method: 'POST' })
+  const r = await post('/api/backfill')
   if (!r.ok) throw new Error(`backfill: ${r.status}`)
 }
 
 export async function triggerEmbed(): Promise<{ embedded: number; total: number }> {
-  const r = await fetch('/api/embed', { method: 'POST' })
+  const r = await post('/api/embed')
   if (!r.ok) throw new Error(`embed: ${r.status}`)
   return r.json()
 }
 
 export async function triggerScanDuplicates(threshold = 0.75): Promise<{ candidates: number }> {
-  const r = await fetch(`/api/scan-duplicates?threshold=${threshold}`, { method: 'POST' })
+  const r = await post(`/api/scan-duplicates?threshold=${threshold}`)
   if (!r.ok) throw new Error(`scan-duplicates: ${r.status}`)
   return r.json()
 }
 
 export async function triggerCluster(): Promise<{ clusters: number }> {
-  const r = await fetch('/api/cluster', { method: 'POST' })
+  const r = await post('/api/cluster')
   if (!r.ok) throw new Error(`cluster: ${r.status}`)
   return r.json()
 }
@@ -133,6 +179,7 @@ export interface PrView {
   reactions: number
   draft: boolean
   baseBranch: string | null
+  assignees: string[]
   area: string | null
   summary: string | null
   reviewComplexity: string | null
@@ -142,20 +189,21 @@ export interface PrView {
   daysSinceUpdate: number
 }
 
-export async function fetchPRs(): Promise<PrView[]> {
-  const r = await fetch('/api/prs')
+export async function fetchPRs(model?: string): Promise<PrView[]> {
+  const q = modelParam(new URLSearchParams(), model)
+  const r = await fetch(`/api/prs?${q}`)
   if (!r.ok) throw new Error(`prs: ${r.status}`)
   return r.json()
 }
 
 export async function triggerIngestPrBranches(): Promise<{ updated: number }> {
-  const r = await fetch('/api/ingest-pr-branches', { method: 'POST' })
+  const r = await post('/api/ingest-pr-branches')
   if (!r.ok) throw new Error(`ingest-pr-branches: ${r.status}`)
   return r.json()
 }
 
 export async function triggerSync(): Promise<void> {
-  const r = await fetch('/api/sync', { method: 'POST' })
+  const r = await post('/api/sync')
   if (!r.ok && r.status !== 409) throw new Error(`sync: ${r.status}`)
 }
 
@@ -192,15 +240,27 @@ export interface ValueItem {
   duplicateCount: number
 }
 
-export async function fetchPulse(): Promise<PulseEntry[]> {
-  const r = await fetch('/api/pulse')
+export async function fetchPulse(model?: string): Promise<PulseEntry[]> {
+  const q = modelParam(new URLSearchParams(), model)
+  const r = await fetch(`/api/pulse?${q}`)
   if (!r.ok) throw new Error(`pulse: ${r.status}`)
   return r.json()
 }
 
-export async function fetchValue(limit = 25): Promise<ValueItem[]> {
-  const r = await fetch(`/api/value?limit=${limit}`)
+export async function fetchValue(limit = 25, model?: string): Promise<ValueItem[]> {
+  const q = modelParam(new URLSearchParams(), model)
+  q.set('limit', String(limit))
+  const r = await fetch(`/api/value?${q}`)
   if (!r.ok) throw new Error(`value: ${r.status}`)
+  return r.json()
+}
+
+// MVP 6 — dual-model support. The comparison data stays available at GET /api/model-comparison;
+// the UI surface for it was removed once the Haiku-vs-Sonnet determination was made.
+
+export async function triggerSonnetClassify(limit = 0): Promise<{ classified: number }> {
+  const r = await post(`/api/classify-sonnet?limit=${limit}`)
+  if (!r.ok) throw new Error(`classify-sonnet: ${r.status}`)
   return r.json()
 }
 
@@ -296,12 +356,3 @@ export async function fetchDuplicates(params?: {
   return r.json()
 }
 
-export async function confirmDuplicate(id: number): Promise<void> {
-  const r = await fetch(`/api/duplicates/${id}/confirm`, { method: 'POST' })
-  if (!r.ok) throw new Error(`confirm: ${r.status}`)
-}
-
-export async function dismissDuplicate(id: number): Promise<void> {
-  const r = await fetch(`/api/duplicates/${id}/dismiss`, { method: 'POST' })
-  if (!r.ok) throw new Error(`dismiss: ${r.status}`)
-}
