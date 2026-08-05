@@ -223,7 +223,8 @@ public class DuplicateScanService {
 		String placeholders = numbers.stream().map(n -> "?").collect(java.util.stream.Collectors.joining(","));
 		return this.jdbc.query(
 				"select i.number, i.title, c.summary from gh_item i "
-						+ "left join classification c on c.item_number = i.number "
+						+ "left join classification c on c.item_number = i.number and c.model_used = '"
+						+ com.springai.pulse.domain.ModelIds.DEFAULT_CLASSIFIER + "' "
 						+ "where i.number in (" + placeholders + ")",
 				(rs, n) -> new ItemDetail(rs.getInt("number"), rs.getString("title"), rs.getString("summary")),
 				numbers.toArray());

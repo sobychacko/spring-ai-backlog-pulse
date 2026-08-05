@@ -26,7 +26,9 @@ import java.util.Set;
 import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.ObjectMapper;
 
-import org.springframework.jdbc.core.JdbcTemplate;
+import com.springai.pulse.domain.ModelIds;
+
+import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Repository;
 
@@ -46,7 +48,7 @@ import org.springframework.stereotype.Repository;
 @Repository
 public class AnalyticsRepository {
 
-	private final JdbcTemplate jdbc;
+	private final NamedParameterJdbcTemplate jdbc;
 
 	private final ObjectMapper objectMapper;
 
@@ -54,11 +56,11 @@ public class AnalyticsRepository {
 	};
 
 	public AnalyticsRepository(NamedParameterJdbcTemplate jdbc, ObjectMapper objectMapper) {
-		this.jdbc = jdbc.getJdbcTemplate();
+		this.jdbc = jdbc;
 		this.objectMapper = objectMapper;
 	}
 
-	public List<PulseEntry> pulseByArea() {
+	public List<PulseEntry> pulseByArea(String model) {
 		return this.jdbc.query("""
 				with area_stats as (
 				  select
@@ -69,7 +71,7 @@ public class AnalyticsRepository {
 				    coalesce(sum(i.reactions_total + i.comments_count), 0)                    as total_engagement
 				  from classification c
 				  join gh_item i on i.number = c.item_number
-				  where i.state = 'open' and c.area is not null
+				  where i.state = 'open' and c.area is not null and c.model_used = :model
 				  group by c.area
 				),
 				maxima as (
@@ -92,11 +94,12 @@ public class AnalyticsRepository {
 				  ) * 100)::integer as pulse_score
 				from area_stats a, maxima m
 				order by pulse_score desc
-				""", (rs, n) -> new PulseEntry(rs.getString("area"), rs.getLong("volume"), rs.getLong("velocity"),
+				""", modelParams(model),
+				(rs, n) -> new PulseEntry(rs.getString("area"), rs.getLong("volume"), rs.getLong("velocity"),
 				rs.getDouble("avg_engagement"), rs.getLong("total_engagement"), rs.getInt("pulse_score")));
 	}
 
-	public List<ValueItem> valueQueue(int limit) {
+	public List<ValueItem> valueQueue(int limit, String model) {
 		return this.jdbc.query("""
 				with item_scores as (
 				  select
@@ -116,10 +119,13 @@ public class AnalyticsRepository {
 				    (i.reactions_total + i.comments_count)::numeric           as engagement,
 				    extract(epoch from (now() - i.created_at)) / 86400        as age_days,
 				    (select count(*) from item_link il
+				     join gh_item other on other.number =
+				         case when il.from_number = i.number then il.to_number else il.from_number end
 				     where il.source = 'embedding' and il.decided_at is null
+				       and other.state = 'open'
 				       and (il.from_number = i.number or il.to_number = i.number))::int as dup_count
 				  from gh_item i
-				  left join classification c on c.item_number = i.number
+				  left join classification c on c.item_number = i.number and c.model_used = :model
 				  where i.state = 'open'
 				    and i.kind = 'issue'
 				    and (i.author is null or i.author not like '%[bot]%')
@@ -149,12 +155,13 @@ public class AnalyticsRepository {
 				  ) * 100)::integer as value_score
 				from item_scores s, maxima m
 				order by value_score desc
-				limit ?
-				""", (rs, n) -> new ValueItem(rs.getInt("number"), rs.getString("kind"), rs.getString("title"),
+				limit :limit
+				""", modelParams(model).addValue("limit", Math.min(Math.max(limit, 1), 100)),
+				(rs, n) -> new ValueItem(rs.getInt("number"), rs.getString("kind"), rs.getString("title"),
 				rs.getString("url"), rs.getInt("reactions_total"), rs.getInt("comments_count"), rs.getString("type"),
 				rs.getString("area"), parseList(rs.getString("providers")), rs.getString("severity"),
 				(Boolean) rs.getObject("good_first_issue"), rs.getString("summary"), rs.getInt("age_days"),
-				rs.getInt("value_score"), rs.getInt("dup_count")), Math.min(Math.max(limit, 1), 100));
+				rs.getInt("value_score"), rs.getInt("dup_count")));
 	}
 
 	/**
@@ -162,7 +169,7 @@ public class AnalyticsRepository {
 	 * ECharts heatmap can consume directly: parallel {@code areas} and {@code weeks} index
 	 * arrays plus {@code data} as {@code [weekIdx, areaIdx, count]} triples.
 	 */
-	public HeatmapData heatmap() {
+	public HeatmapData heatmap(String model) {
 		record Row(String area, String week, int count) {
 		}
 		List<Row> rows = this.jdbc.query("""
@@ -171,12 +178,12 @@ public class AnalyticsRepository {
 				    to_char(date_trunc('week', i.created_at), 'YYYY-MM-DD') as week,
 				    count(*)::int as cnt
 				from gh_item i
-				join classification c on c.item_number = i.number
+				join classification c on c.item_number = i.number and c.model_used = :model
 				where i.created_at >= now() - interval '52 weeks'
 				  and c.area is not null
 				group by c.area, date_trunc('week', i.created_at)
 				order by week, c.area
-				""", (rs, n) -> new Row(rs.getString("area"), rs.getString("week"), rs.getInt("cnt")));
+				""", modelParams(model), (rs, n) -> new Row(rs.getString("area"), rs.getString("week"), rs.getInt("cnt")));
 
 		// Collect ordered unique sets
 		Set<String> weekSet = new LinkedHashSet<>();
@@ -208,6 +215,11 @@ public class AnalyticsRepository {
 			.toList();
 
 		return new HeatmapData(areas, weeks, data);
+	}
+
+	private static MapSqlParameterSource modelParams(String model) {
+		return new MapSqlParameterSource("model",
+				(model == null || model.isBlank()) ? ModelIds.DEFAULT_CLASSIFIER : model);
 	}
 
 	private List<String> parseList(String json) {

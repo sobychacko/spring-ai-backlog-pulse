@@ -84,26 +84,17 @@ public class ItemLinkRepository {
 		return new HashSet<>(pairs);
 	}
 
-	/** Confirm a candidate (human verified the relationship). */
-	public void confirm(long id) {
-		this.jdbc.getJdbcTemplate().update("""
-				update item_link set confirmed = true, decided_at = now()
-				where id = ? and decided_at is null
-				""", id);
-	}
-
-	/** Dismiss a candidate (human decided it is not a real relationship). */
-	public void dismiss(long id) {
-		this.jdbc.getJdbcTemplate().update("""
-				update item_link set confirmed = false, decided_at = now()
-				where id = ? and decided_at is null
-				""", id);
-	}
+	/** The only link types that exist — user-supplied type filters must match one exactly. */
+	private static final java.util.Set<String> LINK_TYPES = java.util.Set.of("duplicate_candidate", "competing_pr",
+			"pr_fixes_issue", "related", "closes", "references");
 
 	/** Pending (undecided) candidate pairs with full item detail for the review UI. */
 	public List<DuplicatePairView> findPendingCandidates(String typeFilter, int limit, int offset) {
-		String typeClause = (typeFilter != null && !typeFilter.isBlank())
-				? "and il.type = '" + typeFilter.replace("'", "''") + "'" : "";
+		// whitelist, not escaping: anything outside the known set is ignored
+		String typeClause = (typeFilter != null && LINK_TYPES.contains(typeFilter))
+				? "and il.type = '" + typeFilter + "'" : "";
+		// summaries/areas on the compare cards come from the default (bulk) classifier's rows
+		String modelClause = "and %s.model_used = '" + com.springai.pulse.domain.ModelIds.DEFAULT_CLASSIFIER + "'";
 		return this.jdbc.getJdbcTemplate().query("""
 				select
 				    il.id, il.type, il.confidence, il.source,
@@ -114,15 +105,16 @@ public class ItemLinkRepository {
 				from item_link il
 				join gh_item fa on fa.number = il.from_number
 				join gh_item ta on ta.number = il.to_number
-				left join classification fc on fc.item_number = il.from_number
-				left join classification tc on tc.item_number = il.to_number
+				left join classification fc on fc.item_number = il.from_number %s
+				left join classification tc on tc.item_number = il.to_number %s
 				where il.source = 'embedding'
 				  and il.decided_at is null
-				  """ + typeClause + """
-
+				  and fa.state = 'open' and ta.state = 'open'
+				  %s
 				order by il.confidence desc, il.id
 				limit ? offset ?
-				""", (rs, n) -> new DuplicatePairView(rs.getLong("id"), rs.getString("type"),
+				""".formatted(modelClause.formatted("fc"), modelClause.formatted("tc"), typeClause),
+				(rs, n) -> new DuplicatePairView(rs.getLong("id"), rs.getString("type"),
 				rs.getDouble("confidence"), rs.getString("source"),
 				new DuplicateItemView(rs.getInt("from_num"), rs.getString("from_kind"),
 						rs.getString("from_title"), rs.getString("from_url"), rs.getString("from_area"),
@@ -134,20 +126,30 @@ public class ItemLinkRepository {
 	}
 
 	public long countPendingCandidates(String typeFilter) {
-		String typeClause = (typeFilter != null && !typeFilter.isBlank())
-				? "and type = '" + typeFilter.replace("'", "''") + "'" : "";
-		Long n = this.jdbc.getJdbcTemplate().queryForObject(
-				"select count(*) from item_link where source = 'embedding' and decided_at is null " + typeClause,
-				Long.class);
+		String typeClause = (typeFilter != null && LINK_TYPES.contains(typeFilter))
+				? "and il.type = '" + typeFilter + "'" : "";
+		Long n = this.jdbc.getJdbcTemplate().queryForObject("""
+				select count(*) from item_link il
+				join gh_item fa on fa.number = il.from_number
+				join gh_item ta on ta.number = il.to_number
+				where il.source = 'embedding' and il.decided_at is null
+				  and fa.state = 'open' and ta.state = 'open'
+				""" + typeClause, Long.class);
 		return n != null ? n : 0;
 	}
 
-	/** Number of pending (unresolved) embedding candidates involving this item. */
+	/**
+	 * Number of pending (unresolved) embedding candidates involving this item. A pair whose
+	 * other side was closed on GitHub is resolved by that closure and no longer counts.
+	 */
 	public int pendingCandidateCount(int itemNumber) {
 		Long n = this.jdbc.getJdbcTemplate().queryForObject("""
-				select count(*) from item_link
-				where source = 'embedding' and decided_at is null
-				  and (from_number = ? or to_number = ?)
+				select count(*) from item_link il
+				join gh_item fa on fa.number = il.from_number
+				join gh_item ta on ta.number = il.to_number
+				where il.source = 'embedding' and il.decided_at is null
+				  and fa.state = 'open' and ta.state = 'open'
+				  and (il.from_number = ? or il.to_number = ?)
 				""", Long.class, itemNumber, itemNumber);
 		return n != null ? n.intValue() : 0;
 	}

@@ -71,9 +71,10 @@ public class ClusterRepository {
 				join item_cluster ic on ic.cluster_id = tc.id
 				join gh_item i on i.number = ic.item_number
 				left join classification c on c.item_number = ic.item_number
+					and c.model_used = '%s'
 				group by tc.id, tc.label, tc.size
 				order by total_engagement desc
-				""",
+				""".formatted(com.springai.pulse.domain.ModelIds.DEFAULT_CLASSIFIER),
 				(rs, n) -> new ClusterView(rs.getLong("id"), rs.getString("label"), rs.getInt("size"),
 						rs.getInt("total_engagement"), rs.getString("dominant_area")));
 	}
@@ -87,9 +88,10 @@ public class ClusterRepository {
 				from item_cluster ic
 				join gh_item i on i.number = ic.item_number
 				left join classification c on c.item_number = ic.item_number
+					and c.model_used = '%s'
 				where ic.cluster_id = ?
 				order by (i.reactions_total + i.comments_count) desc
-				""",
+				""".formatted(com.springai.pulse.domain.ModelIds.DEFAULT_CLASSIFIER),
 				(rs, n) -> new ClusterItemView(
 						rs.getInt("number"), rs.getString("kind"), rs.getString("title"), rs.getString("url"),
 						rs.getInt("reactions_total"), rs.getInt("comments_count"),

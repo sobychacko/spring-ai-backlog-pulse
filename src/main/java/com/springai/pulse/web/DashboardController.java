@@ -25,12 +25,13 @@ import com.springai.pulse.analytics.AnalyticsRepository.HeatmapData;
 import com.springai.pulse.analytics.AnalyticsRepository.PulseEntry;
 import com.springai.pulse.analytics.AnalyticsRepository.ValueItem;
 import com.springai.pulse.cluster.ClusterRepository;
+import com.springai.pulse.config.PulseProperties;
+import com.springai.pulse.domain.ModelIds;
 import com.springai.pulse.persistence.ItemLinkRepository;
 import com.springai.pulse.persistence.ReadModelRepository;
 
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
-import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -51,17 +52,21 @@ public class DashboardController {
 
 	private final ItemLinkRepository links;
 
+	private final PulseProperties props;
+
 	public DashboardController(ReadModelRepository readModel, AnalyticsRepository analytics,
-			ClusterRepository clusterRepo, ItemLinkRepository links) {
+			ClusterRepository clusterRepo, ItemLinkRepository links, PulseProperties props) {
 		this.readModel = readModel;
 		this.analytics = analytics;
 		this.clusterRepo = clusterRepo;
 		this.links = links;
+		this.props = props;
 	}
 
 	@GetMapping("/facets")
-	public ReadModelRepository.Facets facets() {
-		return this.readModel.facets();
+	public ReadModelRepository.Facets facets(
+			@RequestParam(defaultValue = ModelIds.DEFAULT_CLASSIFIER) String model) {
+		return this.readModel.facets(model);
 	}
 
 	@GetMapping("/items")
@@ -72,20 +77,28 @@ public class DashboardController {
 			@RequestParam(required = false) Integer ageDaysMin, @RequestParam(required = false) Integer ageDaysMax,
 			@RequestParam(required = false) Boolean goodFirstIssue,
 			@RequestParam(required = false) String kind, @RequestParam(required = false) String search,
-			@RequestParam(defaultValue = "100") int limit, @RequestParam(defaultValue = "0") int offset) {
+			@RequestParam(defaultValue = "100") int limit, @RequestParam(defaultValue = "0") int offset,
+			@RequestParam(defaultValue = ModelIds.DEFAULT_CLASSIFIER) String model) {
 		return this.readModel.items(type, area, weekOf, enhancementKind, provider, vectorStore, severity,
 				ageDaysMin, ageDaysMax, goodFirstIssue, kind, search,
-				Math.min(Math.max(limit, 1), 500), Math.max(offset, 0));
+				Math.min(Math.max(limit, 1), 500), Math.max(offset, 0), model);
 	}
 
 	@GetMapping("/pulse")
-	public List<PulseEntry> pulse() {
-		return this.analytics.pulseByArea();
+	public List<PulseEntry> pulse(@RequestParam(defaultValue = ModelIds.DEFAULT_CLASSIFIER) String model) {
+		return this.analytics.pulseByArea(model);
 	}
 
 	@GetMapping("/value")
-	public List<ValueItem> value(@RequestParam(defaultValue = "50") int limit) {
-		return this.analytics.valueQueue(Math.min(Math.max(limit, 1), 100));
+	public List<ValueItem> value(@RequestParam(defaultValue = "50") int limit,
+			@RequestParam(defaultValue = ModelIds.DEFAULT_CLASSIFIER) String model) {
+		return this.analytics.valueQueue(Math.min(Math.max(limit, 1), 100), model);
+	}
+
+	@GetMapping("/model-comparison")
+	public ReadModelRepository.ComparisonResult modelComparison(@RequestParam(defaultValue = "50") int limit) {
+		return this.readModel.modelComparison(ModelIds.DEFAULT_CLASSIFIER, this.props.classify().sonnetModel(),
+				Math.min(Math.max(limit, 1), 200));
 	}
 
 	@GetMapping("/clusters")
@@ -100,8 +113,8 @@ public class DashboardController {
 	}
 
 	@GetMapping("/heatmap")
-	public HeatmapData heatmap() {
-		return this.analytics.heatmap();
+	public HeatmapData heatmap(@RequestParam(defaultValue = ModelIds.DEFAULT_CLASSIFIER) String model) {
+		return this.analytics.heatmap(model);
 	}
 
 	@GetMapping("/duplicates")
@@ -114,21 +127,10 @@ public class DashboardController {
 		return Map.of("pairs", pairs, "total", total);
 	}
 
-	@PostMapping("/duplicates/{id}/confirm")
-	public Map<String, Object> confirmDuplicate(@PathVariable long id) {
-		this.links.confirm(id);
-		return Map.of("id", id, "confirmed", true);
-	}
-
-	@PostMapping("/duplicates/{id}/dismiss")
-	public Map<String, Object> dismissDuplicate(@PathVariable long id) {
-		this.links.dismiss(id);
-		return Map.of("id", id, "dismissed", true);
-	}
-
 	@GetMapping("/prs")
-	public List<ReadModelRepository.PrView> prs() {
-		return this.readModel.openPrs();
+	public List<ReadModelRepository.PrView> prs(
+			@RequestParam(defaultValue = ModelIds.DEFAULT_CLASSIFIER) String model) {
+		return this.readModel.openPrs(model);
 	}
 
 }
