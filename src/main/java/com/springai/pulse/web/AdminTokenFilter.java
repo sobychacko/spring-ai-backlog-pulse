@@ -60,6 +60,10 @@ public class AdminTokenFilter extends OncePerRequestFilter {
 	@Override
 	protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain)
 			throws ServletException, IOException {
+		// baseline hardening on every response: the admin token lives in the operator's
+		// browser, so never allow this UI to be framed (clickjacking → disguised admin clicks)
+		response.setHeader("X-Frame-Options", "DENY");
+		response.setHeader("X-Content-Type-Options", "nosniff");
 		String method = request.getMethod();
 		boolean readOnly = "GET".equals(method) || "HEAD".equals(method) || "OPTIONS".equals(method);
 		if (!readOnly && request.getRequestURI().startsWith("/api/") && !this.token.isBlank()) {

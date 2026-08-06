@@ -53,6 +53,20 @@ public class SemanticSearchService {
 	/** Cosine-similarity floor — below this, all-mpnet matches are noise. */
 	private static final double MIN_SIMILARITY = 0.25;
 
+	/**
+	 * Public, unauthenticated endpoint that burns CPU per query (ONNX embedding) — cap the
+	 * input so oversized queries can't grind the tokenizer, and rate-limit globally so abuse
+	 * caps out at a bounded compute cost. The model truncates around 384 tokens anyway, so
+	 * nothing legitimate is lost.
+	 */
+	private static final int MAX_QUERY_CHARS = 2000;
+
+	private static final int MAX_SEARCHES_PER_MINUTE = 120;
+
+	private final java.util.concurrent.atomic.AtomicLong windowStart = new java.util.concurrent.atomic.AtomicLong();
+
+	private final java.util.concurrent.atomic.AtomicInteger windowCount = new java.util.concurrent.atomic.AtomicInteger();
+
 	private static final TypeReference<List<String>> LIST_OF_STRING = new TypeReference<>() {
 	};
 
@@ -70,6 +84,13 @@ public class SemanticSearchService {
 	}
 
 	public List<SemanticHit> search(String query, String kind, String type, String area, String severity, int limit) {
+		if (!tryAcquire()) {
+			throw new org.springframework.web.server.ResponseStatusException(
+					org.springframework.http.HttpStatus.TOO_MANY_REQUESTS, "semantic search rate limit");
+		}
+		if (query.length() > MAX_QUERY_CHARS) {
+			query = query.substring(0, MAX_QUERY_CHARS);
+		}
 		SearchRequest.Builder request = SearchRequest.builder()
 			.query(query)
 			.topK(OVERFETCH_TOP_K)
@@ -120,6 +141,17 @@ public class SemanticSearchService {
 			.sorted(Comparator.comparingDouble(SemanticHit::similarity).reversed())
 			.limit(limit)
 			.toList();
+	}
+
+	/** Global fixed-window limiter — crude on purpose: it protects the compute bill, and the
+	 * worst failure mode (window exhausted by abuse) degrades search, not the dashboard. */
+	private boolean tryAcquire() {
+		long now = System.currentTimeMillis();
+		long start = this.windowStart.get();
+		if (now - start > 60_000 && this.windowStart.compareAndSet(start, now)) {
+			this.windowCount.set(0);
+		}
+		return this.windowCount.incrementAndGet() <= MAX_SEARCHES_PER_MINUTE;
 	}
 
 	private static String blankToNull(String value) {
