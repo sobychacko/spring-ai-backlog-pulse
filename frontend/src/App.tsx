@@ -9,7 +9,6 @@ import {
   triggerCluster,
   triggerEmbed,
   triggerIngest,
-  triggerIngestPrBranches,
   triggerScanDuplicates,
   triggerSonnetClassify,
   triggerSync,
@@ -139,17 +138,6 @@ export default function App() {
       setStatus(`Found ${r.candidates} duplicate/related candidates`)
     } catch (e) {
       setStatus(`Scan error: ${e}`)
-    }
-  }
-
-  async function handleIngestPrBranches() {
-    setAdminOpen(false)
-    setStatus('Fetching PR base branches…')
-    try {
-      const r = await triggerIngestPrBranches()
-      setStatus(`Updated base branches for ${r.updated} PRs`)
-    } catch (e) {
-      setStatus(`Error: ${e}`)
     }
   }
 
@@ -310,12 +298,6 @@ export default function App() {
                     className="block w-full px-4 py-2.5 text-left text-[13px] hover:bg-[#21262d]"
                   >
                     Classify with Sonnet
-                  </button>
-                  <button
-                    onClick={handleIngestPrBranches}
-                    className="block w-full px-4 py-2.5 text-left text-[13px] hover:bg-[#21262d]"
-                  >
-                    Fetch PR base branches
                   </button>
                   <div className="my-1 border-t border-edge" />
                   <button

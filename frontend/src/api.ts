@@ -223,12 +223,6 @@ export async function fetchPRs(model?: string): Promise<PrView[]> {
   return r.json()
 }
 
-export async function triggerIngestPrBranches(): Promise<{ updated: number }> {
-  const r = await post('/api/ingest-pr-branches')
-  if (!r.ok) throw new Error(`ingest-pr-branches: ${r.status}`)
-  return r.json()
-}
-
 export async function triggerSync(): Promise<void> {
   const r = await post('/api/sync')
   if (!r.ok && r.status !== 409) throw new Error(`sync: ${r.status}`)
