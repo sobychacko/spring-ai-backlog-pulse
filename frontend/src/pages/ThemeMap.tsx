@@ -24,6 +24,8 @@ const AREA_COLORS: Record<string, string> = {
   'observability':     '#ffa657',
   'chat-memory':       '#2ea043',
   'structured-output': '#bc8cff',
+  'image':             '#f778ba',
+  'audio':             '#39c5cf',
   'core':              '#8b949e',
   'docs':              '#6e7681',
   'testing':           '#c9d1d9',
@@ -34,7 +36,6 @@ const AREA_COLORS: Record<string, string> = {
 function areaColor(area: string): string {
   return AREA_COLORS[area] ?? '#58a6ff'
 }
-
 const KIND_ICON: Record<string, string> = { issue: '◎', pr: '⇄' }
 
 // ── Cluster drawer ────────────────────────────────────────────────────────────
@@ -175,208 +176,172 @@ function ClusterDrawer({
   )
 }
 
-// ── Cluster card ──────────────────────────────────────────────────────────────
-function ClusterCard({
-  cluster,
-  maxEngagement,
-  onClick,
-}: {
-  cluster: ClusterEntry
-  maxEngagement: number
-  onClick: () => void
-}) {
-  const area = cluster.dominantArea ?? 'other'
-  const color = areaColor(area)
-  const barPct = maxEngagement > 0 ? Math.round((cluster.totalEngagement / maxEngagement) * 100) : 0
-
-  return (
-    <div
-      role="button"
-      tabIndex={0}
-      onClick={onClick}
-      onKeyDown={e => (e.key === 'Enter' || e.key === ' ') && onClick()}
-      className="group flex cursor-pointer flex-col rounded-lg border border-edge bg-surface p-3.5 transition-all duration-150 hover:border-[#58a6ff44] hover:shadow-md focus:outline-none focus:ring-1 focus:ring-[#58a6ff]"
-      style={{ ['--area-color' as string]: color }}
-    >
-      {/* Top row: area pill + item count */}
-      <div className="mb-2 flex items-center gap-2">
-        <span
-          className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium"
-          style={{ background: `${color}18`, color, border: `1px solid ${color}35` }}
-        >
-          <span className="inline-block h-1.5 w-1.5 rounded-full" style={{ background: color }} />
-          {area}
-        </span>
-        <span className="ml-auto text-[11px] tabular-nums text-subtle">
-          {cluster.size} item{cluster.size !== 1 ? 's' : ''}
-        </span>
-      </div>
-
-      {/* Cluster name */}
-      <p className="flex-1 text-[13px] font-medium leading-snug text-body">{cluster.label}</p>
-
-      {/* Engagement bar */}
-      <div className="mt-3">
-        <div className="h-[3px] w-full overflow-hidden rounded-full bg-edge">
-          <div
-            className="h-full rounded-full transition-all duration-500"
-            style={{ width: `${barPct}%`, background: color }}
-          />
-        </div>
-        <div className="mt-1 flex items-center justify-between">
-          <span className="text-[10px] text-subtle">engagement</span>
-          <span className="text-[10px] tabular-nums text-subtle">{cluster.totalEngagement}</span>
-        </div>
-      </div>
-    </div>
-  )
+// ── Theme treemap (hero) ──────────────────────────────────────────────────────
+interface AreaGroupMeta {
+  area: string
+  themes: number
+  items: number
+  engagement: number
 }
 
-// ── Card wall ─────────────────────────────────────────────────────────────────
-function ClusterWall({ clusters }: { clusters: ClusterEntry[] }) {
-  const [areaFilter, setAreaFilter] = useState<string | null>(null)
-  const [sort, setSort] = useState<'engagement' | 'size'>('engagement')
-  const [search, setSearch] = useState('')
-  const [selectedCluster, setSelectedCluster] = useState<ClusterEntry | null>(null)
-
-  // Areas with counts, sorted by total engagement desc
-  const areas = useMemo(() => {
-    const map = new Map<string, number>()
+function ThemeTreemap({
+  clusters,
+  sizeBy,
+  onSelect,
+  onAreaSelect,
+}: {
+  clusters: ClusterEntry[]
+  sizeBy: 'engagement' | 'items'
+  onSelect: (c: ClusterEntry) => void
+  onAreaSelect: (area: string) => void
+}) {
+  const option = useMemo(() => {
+    // Two levels: area group (labeled header strip) -> theme clusters
+    const byArea = new Map<string, ClusterEntry[]>()
     for (const c of clusters) {
       const a = c.dominantArea ?? 'other'
-      map.set(a, (map.get(a) ?? 0) + 1)
+      const list = byArea.get(a)
+      if (list) list.push(c)
+      else byArea.set(a, [c])
     }
-    return Array.from(map.entries())
-      .sort((a, b) => {
-        const engA = clusters.filter(c => (c.dominantArea ?? 'other') === a[0]).reduce((s, c) => s + c.totalEngagement, 0)
-        const engB = clusters.filter(c => (c.dominantArea ?? 'other') === b[0]).reduce((s, c) => s + c.totalEngagement, 0)
-        return engB - engA
-      })
-  }, [clusters])
-
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase()
-    return clusters
-      .filter(c => !areaFilter || (c.dominantArea ?? 'other') === areaFilter)
-      .filter(c => !q || c.label.toLowerCase().includes(q))
-      .sort((a, b) =>
-        sort === 'engagement'
-          ? b.totalEngagement - a.totalEngagement
-          : b.size - a.size
-      )
-  }, [clusters, areaFilter, sort, search])
-
-  const maxEngagement = useMemo(
-    () => Math.max(...clusters.map(c => c.totalEngagement), 1),
-    [clusters]
-  )
-
-  if (clusters.length === 0) {
-    return (
-      <div className="py-16 text-center text-[13px] text-subtle">
-        No clusters yet — run{' '}
-        <strong className="text-accent">Admin → Embed items</strong> then{' '}
-        <strong className="text-accent">Build theme clusters</strong>.
-      </div>
-    )
-  }
+    const data = Array.from(byArea.entries()).map(([area, list]) => {
+      const color = areaColor(area)
+      const meta: AreaGroupMeta = {
+        area,
+        themes: list.length,
+        items: list.reduce((s, c) => s + c.size, 0),
+        engagement: list.reduce((s, c) => s + c.totalEngagement, 0),
+      }
+      return {
+        name: area,
+        areaGroup: meta,
+        itemStyle: { color: `${color}0f`, borderColor: `${color}2b` },
+        children: list.map(c => ({
+          name: c.label,
+          // Floor keeps zero/near-zero-engagement themes visible enough to hover
+          value: sizeBy === 'engagement' ? Math.max(c.totalEngagement, 3) : c.size,
+          cluster: c,
+          itemStyle: { color: `${color}33` },
+          emphasis: { itemStyle: { color: `${color}59` } },
+        })),
+      }
+    })
+    return {
+      backgroundColor: 'transparent',
+      tooltip: {
+        backgroundColor: '#161b22',
+        borderColor: '#30363d',
+        borderWidth: 1,
+        textStyle: { color: '#e6edf3', fontSize: 12 },
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        formatter: (p: any) => {
+          const c: ClusterEntry | undefined = p.data?.cluster
+          if (c) {
+            const area = c.dominantArea ?? 'other'
+            const sized =
+              sizeBy === 'engagement'
+                ? `<b>${c.totalEngagement} engagement</b> · ${c.size} items`
+                : `<b>${c.size} items</b> · ${c.totalEngagement} engagement`
+            return (
+              `<div style="max-width:280px">` +
+              `<div style="font-weight:600;margin-bottom:3px;white-space:normal">${escapeHtml(c.label)}</div>` +
+              `<span style="color:${areaColor(area)}">${escapeHtml(area)}</span>` +
+              `<span style="color:#8b949e"> · ${sized}</span>` +
+              `<div style="color:#6e7681;margin-top:3px">click to view items</div>` +
+              `</div>`
+            )
+          }
+          const g: AreaGroupMeta | undefined = p.data?.areaGroup
+          if (g) {
+            return (
+              `<span style="color:${areaColor(g.area)};font-weight:600">${escapeHtml(g.area)}</span>` +
+              `<span style="color:#8b949e"> · ${g.themes} themes · ${g.items} items · ${g.engagement} engagement</span>` +
+              `<div style="color:#6e7681;margin-top:3px">click to focus this area</div>`
+            )
+          }
+          return ''
+        },
+      },
+      series: [
+        {
+          type: 'treemap',
+          left: 0,
+          top: 0,
+          right: 0,
+          bottom: 0,
+          roam: false,
+          nodeClick: false,
+          breadcrumb: { show: false },
+          data,
+          upperLabel: {
+            show: true,
+            height: 26,
+            fontSize: 11,
+            fontWeight: 600,
+            color: '#e6edf3',
+            backgroundColor: 'rgba(1,4,9,0.72)',
+            padding: [3, 8],
+            borderRadius: 4,
+            overflow: 'truncate',
+            ellipsis: '…',
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            formatter: (p: any) => {
+              const g: AreaGroupMeta | undefined = p.data?.areaGroup
+              return g ? `${g.area.toUpperCase()}  ·  ${g.themes}` : ''
+            },
+          },
+          label: {
+            show: true,
+            position: 'insideTopLeft',
+            padding: 8,
+            overflow: 'break',
+            lineOverflow: 'truncate',
+            fontSize: 12,
+            fontWeight: 600,
+            color: '#e6edf3',
+            lineHeight: 16,
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            formatter: (p: any) => p.data?.cluster?.label ?? '',
+          },
+          // Blocks too small to fit a word get no label at all (tooltip covers them)
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          labelLayout: (p: any) =>
+            p.rect && (p.rect.width < 64 || p.rect.height < 30) ? { fontSize: 0 } : {},
+          levels: [
+            // level 0: virtual root
+            { itemStyle: { borderWidth: 0, gapWidth: 4 }, upperLabel: { show: false } },
+            // level 1: area groups — header strip + breathing room around children
+            { itemStyle: { borderColor: '#0d1117', borderWidth: 4, gapWidth: 4 } },
+            // level 2: theme blocks
+            { itemStyle: { borderColor: '#0d1117', borderWidth: 1, gapWidth: 2 } },
+          ],
+          emphasis: {
+            label: { color: '#ffffff' },
+            itemStyle: { shadowBlur: 18, shadowColor: 'rgba(88,166,255,0.28)' },
+          },
+        },
+      ],
+    }
+  }, [clusters, sizeBy])
 
   return (
-    <div className="space-y-4">
-      {/* Controls */}
-      <div className="flex flex-wrap items-center gap-2">
-        {/* Search */}
-        <input
-          type="search"
-          placeholder="Search clusters…"
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-          className="h-7 w-48 rounded-md border border-edge bg-transparent px-2.5 text-[12px] text-body placeholder-subtle outline-none focus:border-[#58a6ff55]"
-        />
-
-        {/* Area filter chips */}
-        <div className="flex flex-wrap gap-1.5">
-          <button
-            onClick={() => setAreaFilter(null)}
-            className={`rounded-full px-2.5 py-0.5 text-[11px] transition-colors ${
-              !areaFilter
-                ? 'bg-primary text-white'
-                : 'border border-edge text-subtle hover:text-body'
-            }`}
-          >
-            All <span className="opacity-60">({clusters.length})</span>
-          </button>
-          {areas.map(([area, count]) => (
-            <button
-              key={area}
-              onClick={() => setAreaFilter(areaFilter === area ? null : area)}
-              className="rounded-full px-2.5 py-0.5 text-[11px] transition-colors"
-              style={
-                areaFilter === area
-                  ? { background: areaColor(area), color: '#fff' }
-                  : {
-                      border: `1px solid ${areaColor(area)}40`,
-                      color: areaFilter ? '#6e7681' : areaColor(area),
-                    }
-              }
-            >
-              {area} <span className="opacity-60">({count})</span>
-            </button>
-          ))}
-        </div>
-
-        {/* Sort toggle */}
-        <div className="ml-auto flex rounded-md border border-edge text-[11px] overflow-hidden">
-          <button
-            onClick={() => setSort('engagement')}
-            className={`px-2.5 py-1 transition-colors ${
-              sort === 'engagement' ? 'bg-surface text-body' : 'text-subtle hover:text-body'
-            }`}
-          >
-            Engagement
-          </button>
-          <button
-            onClick={() => setSort('size')}
-            className={`px-2.5 py-1 border-l border-edge transition-colors ${
-              sort === 'size' ? 'bg-surface text-body' : 'text-subtle hover:text-body'
-            }`}
-          >
-            Size
-          </button>
-        </div>
-      </div>
-
-      {/* Result count */}
-      {(areaFilter || search) && (
-        <p className="text-[12px] text-subtle">
-          {filtered.length} cluster{filtered.length !== 1 ? 's' : ''}
-          {areaFilter && (
-            <span> in <span style={{ color: areaColor(areaFilter) }}>{areaFilter}</span></span>
-          )}
-          {search && <span> matching "{search}"</span>}
-        </p>
-      )}
-
-      {/* Card grid */}
-      {filtered.length === 0 ? (
-        <p className="py-10 text-center text-[13px] text-subtle">No clusters match your filter.</p>
-      ) : (
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {filtered.map(c => (
-            <ClusterCard
-              key={c.label}
-              cluster={c}
-              maxEngagement={maxEngagement}
-              onClick={() => setSelectedCluster(c)}
-            />
-          ))}
-        </div>
-      )}
-
-      {selectedCluster && (
-        <ClusterDrawer cluster={selectedCluster} onClose={() => setSelectedCluster(null)} />
-      )}
-    </div>
+    <EChart
+      option={option}
+      style={{ height: 'calc(100vh - 290px)', minHeight: 460 }}
+      onEvents={{
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        click: (params: any) => {
+          const c: ClusterEntry | undefined = params.data?.cluster
+          if (c) {
+            onSelect(c)
+            return
+          }
+          // Group nodes are only hittable on their header strip (children cover the rest)
+          const g: AreaGroupMeta | undefined = params.data?.areaGroup
+          if (g) onAreaSelect(g.area)
+        },
+      }}
+    />
   )
 }
 
@@ -446,7 +411,7 @@ function PulseHeatmap({ data, onCellClick }: { data: HeatmapData; onCellClick: (
   return (
     <EChart
       option={option}
-      style={{ height: Math.max(220, data.areas.length * 24 + 80) }}
+      style={{ height: Math.max(300, data.areas.length * 28 + 90) }}
       onEvents={{
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         click: (params: any) => {
@@ -464,11 +429,17 @@ function PulseHeatmap({ data, onCellClick }: { data: HeatmapData; onCellClick: (
 }
 
 // ── Page ──────────────────────────────────────────────────────────────────────
+type View = 'map' | 'heatmap'
+
 export function ThemeMap() {
   const [clusters, setClusters] = useState<ClusterEntry[]>([])
   const [heatmap, setHeatmap] = useState<HeatmapData | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [view, setView] = useState<View>('map')
+  const [sizeBy, setSizeBy] = useState<'engagement' | 'items'>('engagement')
+  const [areaFilter, setAreaFilter] = useState<string | null>(null)
+  const [selectedCluster, setSelectedCluster] = useState<ClusterEntry | null>(null)
   const [heatmapCell, setHeatmapCell] = useState<{ area: string; weekOf: string } | null>(null)
 
   useEffect(() => {
@@ -481,42 +452,96 @@ export function ThemeMap() {
       .finally(() => setLoading(false))
   }, [])
 
+  // Areas present in the clusters, ordered by summed engagement (for legend chips)
+  const areas = useMemo(() => {
+    const eng = new Map<string, number>()
+    const count = new Map<string, number>()
+    for (const c of clusters) {
+      const a = c.dominantArea ?? 'other'
+      eng.set(a, (eng.get(a) ?? 0) + c.totalEngagement)
+      count.set(a, (count.get(a) ?? 0) + 1)
+    }
+    return Array.from(count.entries())
+      .map(([area, n]) => ({ area, count: n, engagement: eng.get(area) ?? 0 }))
+      .sort((a, b) => b.engagement - a.engagement)
+  }, [clusters])
+
+  const visibleClusters = useMemo(
+    () => (areaFilter ? clusters.filter(c => (c.dominantArea ?? 'other') === areaFilter) : clusters),
+    [clusters, areaFilter]
+  )
+
   if (loading) return <div className="py-16 text-center text-subtle">Loading…</div>
   if (error)
     return <div className="rounded-lg border border-danger bg-surface p-4 text-danger">{error}</div>
 
   const totalEngagement = clusters.reduce((s, c) => s + c.totalEngagement, 0)
   const topCluster = [...clusters].sort((a, b) => b.totalEngagement - a.totalEngagement)[0]
-  const areaCount = new Set(clusters.map(c => c.dominantArea ?? 'other')).size
 
   return (
-    <div className="space-y-10">
-      {/* ── Theme map ── */}
-      <section>
-        <div className="mb-5">
-          <div className="flex items-baseline justify-between gap-4">
-            <h2 className="text-[15px] font-semibold">Theme Map</h2>
-            <span className="text-[11px] text-subtle">
-              labels are{' '}
-              <span className="rounded-full border border-[#6e40c9] px-1.5 py-0.5 text-[10px] text-purple">
-                AI-generated
-              </span>
+    <div className="space-y-5">
+      {/* ── Header: view switcher + context ── */}
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="flex gap-2">
+          <button
+            onClick={() => setView('map')}
+            className={`rounded-xl px-4 py-2 text-left transition-all duration-150 ${
+              view === 'map'
+                ? 'bg-[#58a6ff1a] shadow-[0_0_24px_rgba(88,166,255,0.18)] ring-1 ring-[#58a6ff66]'
+                : 'border border-edge opacity-60 hover:opacity-100'
+            }`}
+          >
+            <span className={`block text-[13px] font-semibold ${view === 'map' ? 'text-[#79c0ff]' : 'text-body'}`}>
+              ◈ Theme Map
             </span>
-          </div>
+            <span className="block text-[10px] text-subtle">emergent themes, sized by engagement</span>
+          </button>
+          <button
+            onClick={() => setView('heatmap')}
+            className={`rounded-xl px-4 py-2 text-left transition-all duration-150 ${
+              view === 'heatmap'
+                ? 'bg-[#39d3531a] shadow-[0_0_24px_rgba(57,211,83,0.18)] ring-1 ring-[#39d35366]'
+                : 'border border-edge opacity-60 hover:opacity-100'
+            }`}
+          >
+            <span className={`block text-[13px] font-semibold ${view === 'heatmap' ? 'text-[#56d364]' : 'text-body'}`}>
+              ▦ Pulse Heatmap
+            </span>
+            <span className="block text-[10px] text-subtle">weekly inflow per area, 26 weeks</span>
+          </button>
+        </div>
 
-          {/* Stats row */}
-          {clusters.length > 0 && (
-            <div className="mt-3 flex flex-wrap gap-6">
+        {view === 'map' ? (
+          <span className="ml-auto text-[11px] text-subtle">
+            theme labels are{' '}
+            <span className="rounded-full border border-[#6e40c9] px-1.5 py-0.5 text-[10px] text-purple">
+              AI-generated
+            </span>
+          </span>
+        ) : (
+          <span className="ml-auto text-[11px] text-subtle">
+            new issues &amp; PRs per area per week — last 26 weeks
+          </span>
+        )}
+      </div>
+
+      {view === 'map' ? (
+        clusters.length === 0 ? (
+          <div className="py-16 text-center text-[13px] text-subtle">
+            No clusters yet — run{' '}
+            <strong className="text-accent">Admin → Embed items</strong> then{' '}
+            <strong className="text-accent">Build theme clusters</strong>.
+          </div>
+        ) : (
+          <>
+            {/* Stats + size-by toggle */}
+            <div className="flex flex-wrap items-end gap-6">
               <div>
-                <div className="text-[22px] font-bold tabular-nums leading-none text-body">
-                  {clusters.length}
-                </div>
-                <div className="mt-0.5 text-[11px] text-subtle">clusters</div>
+                <div className="text-[22px] font-bold tabular-nums leading-none text-body">{clusters.length}</div>
+                <div className="mt-0.5 text-[11px] text-subtle">themes</div>
               </div>
               <div>
-                <div className="text-[22px] font-bold tabular-nums leading-none text-body">
-                  {areaCount}
-                </div>
+                <div className="text-[22px] font-bold tabular-nums leading-none text-body">{areas.length}</div>
                 <div className="mt-0.5 text-[11px] text-subtle">areas</div>
               </div>
               <div>
@@ -526,31 +551,85 @@ export function ThemeMap() {
                 <div className="mt-0.5 text-[11px] text-subtle">total engagement</div>
               </div>
               {topCluster && (
-                <div>
+                <div className="min-w-0">
                   <div
-                    className="text-[14px] font-semibold leading-none"
+                    className="truncate text-[14px] font-semibold leading-none"
                     style={{ color: areaColor(topCluster.dominantArea ?? 'other') }}
                   >
                     {topCluster.label}
                   </div>
-                  <div className="mt-0.5 text-[11px] text-subtle">top cluster by engagement</div>
+                  <div className="mt-0.5 text-[11px] text-subtle">top theme by engagement</div>
                 </div>
               )}
+
+              <div className="ml-auto flex items-center gap-2">
+                <span className="text-[11px] text-subtle">block size</span>
+                <div className="flex overflow-hidden rounded-md border border-edge text-[11px]">
+                  <button
+                    onClick={() => setSizeBy('engagement')}
+                    className={`px-2.5 py-1 transition-colors ${
+                      sizeBy === 'engagement' ? 'bg-surface text-body' : 'text-subtle hover:text-body'
+                    }`}
+                  >
+                    Engagement
+                  </button>
+                  <button
+                    onClick={() => setSizeBy('items')}
+                    className={`border-l border-edge px-2.5 py-1 transition-colors ${
+                      sizeBy === 'items' ? 'bg-surface text-body' : 'text-subtle hover:text-body'
+                    }`}
+                  >
+                    Items
+                  </button>
+                </div>
+              </div>
             </div>
-          )}
-        </div>
 
-        <ClusterWall clusters={clusters} />
-      </section>
+            {/* Area legend chips (click to focus one area) */}
+            <div className="flex flex-wrap gap-1.5">
+              <button
+                onClick={() => setAreaFilter(null)}
+                className={`rounded-full px-2.5 py-0.5 text-[11px] transition-colors ${
+                  !areaFilter ? 'bg-primary text-white' : 'border border-edge text-subtle hover:text-body'
+                }`}
+              >
+                All <span className="opacity-60">({clusters.length})</span>
+              </button>
+              {areas.map(({ area, count }) => (
+                <button
+                  key={area}
+                  onClick={() => setAreaFilter(areaFilter === area ? null : area)}
+                  className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[11px] transition-colors"
+                  style={
+                    areaFilter === area
+                      ? { background: areaColor(area), color: '#fff' }
+                      : {
+                          border: `1px solid ${areaColor(area)}40`,
+                          color: areaFilter ? '#6e7681' : areaColor(area),
+                        }
+                  }
+                >
+                  <span
+                    className="inline-block h-1.5 w-1.5 rounded-full"
+                    style={{ background: areaFilter === area ? '#fff' : areaColor(area) }}
+                  />
+                  {area} <span className="opacity-60">({count})</span>
+                </button>
+              ))}
+            </div>
 
-      {/* ── Pulse heatmap ── */}
-      <section>
-        <div className="mb-4">
-          <h2 className="text-[15px] font-semibold">Pulse Heatmap</h2>
-          <p className="mt-1 text-[12px] text-subtle">
-            New issues &amp; PRs per area per week — last 26 weeks. Brighter green = more inflow.
-          </p>
-        </div>
+            {/* The map */}
+            <div className="overflow-hidden rounded-xl border border-edge bg-[#0d1117] p-2">
+              <ThemeTreemap
+                clusters={visibleClusters}
+                sizeBy={sizeBy}
+                onSelect={setSelectedCluster}
+                onAreaSelect={area => setAreaFilter(prev => (prev === area ? null : area))}
+              />
+            </div>
+          </>
+        )
+      ) : (
         <div className="overflow-hidden rounded-xl border border-edge bg-[#0d1117] p-4">
           {heatmap ? (
             <PulseHeatmap data={heatmap} onCellClick={(area, weekOf) => setHeatmapCell({ area, weekOf })} />
@@ -558,7 +637,11 @@ export function ThemeMap() {
             <div className="py-8 text-center text-subtle">No data</div>
           )}
         </div>
-      </section>
+      )}
+
+      {selectedCluster && (
+        <ClusterDrawer cluster={selectedCluster} onClose={() => setSelectedCluster(null)} />
+      )}
 
       {heatmapCell && (
         <ItemDrawer
