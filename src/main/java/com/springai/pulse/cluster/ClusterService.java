@@ -60,6 +60,16 @@ public class ClusterService {
 
 	private static final double CLUSTER_THRESHOLD = 0.68;
 
+	// Clusters larger than this are recursively re-clustered at progressively
+	// higher thresholds until they break into coherent sub-themes. Dense regions
+	// of the embedding space (e.g. tool-calling / structured-output / chat-memory)
+	// otherwise chain into one giant cluster that no view can present usefully.
+	private static final int MAX_CLUSTER_SIZE = 40;
+
+	private static final double SPLIT_THRESHOLD_STEP = 0.04;
+
+	private static final double SPLIT_THRESHOLD_CAP = 0.88;
+
 	// DBSCAN: minimum neighbours above threshold for a point to be a "core point"
 	// that can expand a cluster. Prevents chaining through weakly-connected items.
 	private static final int DBSCAN_MIN_PTS = 3;
@@ -98,13 +108,18 @@ public class ClusterService {
 		logger.info("Clustering {} embedded items at threshold {}", allItems.size(), CLUSTER_THRESHOLD);
 
 		// 2. Fetch similarity edges (k-nearest neighbours per item, undirected)
-		List<int[]> edges = fetchEdges(CLUSTER_THRESHOLD, NEIGHBOR_LIMIT);
+		List<Edge> edges = fetchEdges(CLUSTER_THRESHOLD, NEIGHBOR_LIMIT);
 		logger.info("Cluster: {} edges in similarity graph", edges.size());
 
 		// 3. DBSCAN — avoids the chaining problem of Union-Find by only letting
 		//    core points (>= DBSCAN_MIN_PTS neighbours) expand clusters.
-		List<List<Integer>> significant = dbscan(allItems, edges)
-			.stream()
+		//    Oversized clusters are then recursively split at higher thresholds.
+		List<List<Integer>> refined = new ArrayList<>();
+		for (List<Integer> cluster : dbscan(allItems, filterEdges(edges, CLUSTER_THRESHOLD, null))) {
+			refined.addAll(splitOversized(cluster, edges, CLUSTER_THRESHOLD));
+		}
+
+		List<List<Integer>> significant = refined.stream()
 			.filter(c -> c.size() >= MIN_CLUSTER_SIZE)
 			.sorted((a, b) -> b.size() - a.size())
 			.collect(Collectors.toList());
@@ -133,6 +148,48 @@ public class ClusterService {
 		this.clusters.replaceAll(namedClusters);
 		logger.info("Cluster: wrote {} clusters", namedClusters.size());
 		return namedClusters.size();
+	}
+
+	/**
+	 * Recursively break an oversized cluster into sub-themes by re-running DBSCAN
+	 * over its members at a higher similarity threshold. Stops when the cluster is
+	 * small enough, the threshold cap is reached, or the cluster refuses to split
+	 * (kept intact rather than dissolved into noise).
+	 */
+	private List<List<Integer>> splitOversized(List<Integer> members, List<Edge> edges, double threshold) {
+		double next = threshold + SPLIT_THRESHOLD_STEP;
+		if (members.size() <= MAX_CLUSTER_SIZE || next > SPLIT_THRESHOLD_CAP) {
+			return List.of(members);
+		}
+		Set<Integer> memberSet = new HashSet<>(members);
+		List<List<Integer>> pieces = dbscan(members, filterEdges(edges, next, memberSet));
+		if (pieces.isEmpty()) {
+			logger.info("Cluster split: {} items dissolved at threshold {} — keeping intact", members.size(), next);
+			return List.of(members);
+		}
+		if (pieces.size() == 1 && pieces.get(0).size() == members.size()) {
+			// No progress at this threshold — try the next one up
+			return splitOversized(members, edges, next);
+		}
+		logger.info("Cluster split: {} items -> {} pieces at threshold {}", members.size(), pieces.size(), next);
+		List<List<Integer>> result = new ArrayList<>();
+		for (List<Integer> piece : pieces) {
+			result.addAll(splitOversized(piece, edges, next));
+		}
+		return result;
+	}
+
+	private static List<int[]> filterEdges(List<Edge> edges, double threshold, Set<Integer> within) {
+		List<int[]> out = new ArrayList<>();
+		for (Edge e : edges) {
+			if (e.sim() > threshold && (within == null || (within.contains(e.from()) && within.contains(e.to())))) {
+				out.add(new int[] { e.from(), e.to() });
+			}
+		}
+		return out;
+	}
+
+	record Edge(int from, int to, double sim) {
 	}
 
 	private String nameCluster(List<Integer> members, Map<Integer, String> titles) {
@@ -233,12 +290,13 @@ public class ClusterService {
 		return new ArrayList<>(clusters.values());
 	}
 
-	private List<int[]> fetchEdges(double threshold, int neighborLimit) {
+	private List<Edge> fetchEdges(double threshold, int neighborLimit) {
 		try {
 			return this.jdbc.query("""
 					select
 					    (a.metadata->>'number')::int as from_num,
-					    (b.to_num)::int              as to_num
+					    (b.to_num)::int              as to_num,
+					    b.sim                        as sim
 					from vector_store a
 					cross join lateral (
 					    select
@@ -251,7 +309,7 @@ public class ClusterService {
 					) b
 					where b.sim > ?
 					  and (a.metadata->>'number')::int < (b.to_num)::int
-					""", (rs, n) -> new int[] { rs.getInt("from_num"), rs.getInt("to_num") },
+					""", (rs, n) -> new Edge(rs.getInt("from_num"), rs.getInt("to_num"), rs.getDouble("sim")),
 					neighborLimit, threshold);
 		}
 		catch (Exception ex) {
