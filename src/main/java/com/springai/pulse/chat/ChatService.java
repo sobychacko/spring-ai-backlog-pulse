@@ -133,6 +133,12 @@ public class ChatService {
 		this.budget = budget;
 		this.rateLimiter = rateLimiter;
 		this.inFlight = new Semaphore(Math.max(1, props.chat().maxConcurrent()));
+		// resolved guard values at boot: whether configuration actually reached the process is
+		// otherwise invisible until someone trips a limit. Read through the properties record,
+		// while AdminTokenFilter reports the same block via @Value — if the two disagree, the
+		// binding is at fault rather than the deployment.
+		logger.info("chat guards: budget ${}/day, {} questions/hour per IP, {} concurrent",
+				props.chat().dailyBudgetUsd(), props.chat().questionsPerHour(), props.chat().maxConcurrent());
 		this.vectorStore = vectorStore;
 		this.toolsRepo = toolsRepo;
 		this.analytics = analytics;

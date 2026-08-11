@@ -64,6 +64,10 @@ public class AdminTokenFilter extends OncePerRequestFilter {
 			logger.warn("PULSE_ADMIN_TOKEN not set — POST /api endpoints are UNPROTECTED. "
 					+ "Fine locally; set it before deploying anywhere reachable.");
 		}
+		// states the resolved value at boot: whether the flag actually reached the process is
+		// otherwise invisible from outside, and the deployment's posture is not something the
+		// HTTP API should answer. Logs are private to the operator; this is the right channel.
+		logger.info("POST /api/chat requires the admin token: {}", !this.chatPublic);
 	}
 
 	@Override
