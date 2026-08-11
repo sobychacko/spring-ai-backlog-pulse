@@ -9,21 +9,24 @@ import {
   triggerCluster,
   triggerEmbed,
   triggerIngest,
+  triggerLegacyScan,
   triggerScanDuplicates,
   triggerSonnetClassify,
   triggerSync,
   type Facets,
 } from './api'
+import { AskBacklog } from './pages/AskBacklog'
 import { ByFacet } from './pages/ByFacet'
 import { BacklogPulse } from './pages/BacklogPulse'
 import { DuplicateReview } from './pages/DuplicateReview'
+import { LegacyReview } from './pages/LegacyReview'
 import { Overview } from './pages/Overview'
 import { PRReview } from './pages/PRReview'
 import { Search } from './pages/Search'
 import { ThemeMap } from './pages/ThemeMap'
 import { ValueQueue } from './pages/ValueQueue'
 
-type Tab = 'overview' | 'facet' | 'pulse' | 'value' | 'theme-map' | 'duplicates' | 'prs' | 'search'
+type Tab = 'overview' | 'facet' | 'pulse' | 'value' | 'theme-map' | 'duplicates' | 'prs' | 'legacy' | 'search' | 'ask'
 
 // Per-tab accent + glyph. `active` must be literal class strings so Tailwind's JIT sees them.
 const TABS: { id: Tab; label: string; icon: string; active: string }[] = [
@@ -41,8 +44,12 @@ const TABS: { id: Tab; label: string; icon: string; active: string }[] = [
     active: 'text-cyan-300 bg-cyan-400/10 border-cyan-400/40 shadow-[0_0_16px_-4px_rgba(34,211,238,0.6)]' },
   { id: 'prs',        label: 'PR Review',        icon: '⎇',
     active: 'text-orange-300 bg-orange-400/10 border-orange-400/40 shadow-[0_0_16px_-4px_rgba(251,146,60,0.6)]' },
+  { id: 'legacy',     label: 'Legacy',           icon: '⊘',
+    active: 'text-rose-300 bg-rose-400/10 border-rose-400/40 shadow-[0_0_16px_-4px_rgba(251,113,133,0.6)]' },
   { id: 'search',     label: 'Search',           icon: '⌕',
     active: 'text-indigo-300 bg-indigo-400/10 border-indigo-400/40 shadow-[0_0_16px_-4px_rgba(129,140,248,0.6)]' },
+  { id: 'ask',        label: 'Ask',              icon: '✦',
+    active: 'text-teal-300 bg-teal-400/10 border-teal-400/40 shadow-[0_0_16px_-4px_rgba(45,212,191,0.6)]' },
 ]
 
 export default function App() {
@@ -173,6 +180,27 @@ export default function App() {
       setStatus(`Built ${r.clusters} theme clusters`)
     } catch (e) {
       setStatus(`Cluster error: ${e}`)
+    }
+  }
+
+  async function handleLegacyScan() {
+    setAdminOpen(false)
+    const ok = window.confirm(
+      'Scan open issues that mention an EOL (1.0/1.1) version with Haiku?\n' +
+      '~290 candidates ≈ $0.30 one-time; re-runs only touch new/changed items.',
+    )
+    if (!ok) return
+    setStatus('Scanning legacy candidates…')
+    try {
+      const r = await triggerLegacyScan()
+      setStatus(
+        r.scanned === 0 && r.failed === 0
+          ? 'Legacy scan: nothing to do (all candidates current)'
+          : `Legacy scan: ${r.legacyOnly} legacy-only · ${r.appliesToMain} apply to main · ${r.unclear} unclear` +
+            (r.failed ? ` · ${r.failed} failed` : ''),
+      )
+    } catch (e) {
+      setStatus(`Legacy scan error: ${e}`)
     }
   }
 
@@ -318,6 +346,12 @@ export default function App() {
                   >
                     Build theme clusters
                   </button>
+                  <button
+                    onClick={handleLegacyScan}
+                    className="block w-full px-4 py-2.5 text-left text-[13px] hover:bg-[#21262d]"
+                  >
+                    Scan legacy candidates
+                  </button>
                   <div className="my-1 border-t border-edge" />
                   <button
                     onClick={handleSetAdminToken}
@@ -357,8 +391,12 @@ export default function App() {
             <DuplicateReview />
           ) : tab === 'prs' ? (
             <PRReview />
+          ) : tab === 'legacy' ? (
+            <LegacyReview />
           ) : tab === 'search' ? (
             <Search />
+          ) : tab === 'ask' ? (
+            <AskBacklog />
           ) : null}
         </div>
       </main>

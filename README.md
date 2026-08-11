@@ -121,11 +121,15 @@ The app reads `PORT`, so it works on the usual platforms. Environment:
 | Variable | Purpose |
 |---|---|
 | `PULSE_ADMIN_TOKEN` | Required on any deployment. All state-changing `/api` calls need it as an `X-Admin-Token` header (enter it once via Admin → Set admin token). If unset the app runs unguarded, which is only okay on your own machine. |
-| `ANTHROPIC_API_KEY` | Classification |
+| `ANTHROPIC_API_KEY` | Classification and the Ask tab |
 | `GITHUB_TOKEN` | GitHub API rate limits |
 | `SPRING_DATASOURCE_URL/USERNAME/PASSWORD` | A pgvector-enabled Postgres (JDBC URL) |
 
 GET endpoints are public: the dashboard is read-only over public GitHub data.
+
+The Ask tab is metered per question, so it carries its own limits regardless of how it is
+reached: a daily spend ceiling, a per-IP hourly cap, and a bound on questions answered at
+once. All three are configurable under `pulse.chat`.
 
 ## License
 

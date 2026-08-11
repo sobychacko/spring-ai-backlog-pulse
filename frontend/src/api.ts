@@ -363,6 +363,118 @@ export interface DuplicatesResponse {
   total: number
 }
 
+// MVP 8 — Legacy Review (EOL-branch triage)
+
+export interface LegacyPr {
+  number: number
+  title: string
+  url: string
+  author: string
+  baseBranch: string
+  draft: boolean
+  comments: number
+  reactions: number
+  summary: string | null
+  mainBranchApplicable: string | null
+  mainBranchNote: string | null
+  daysSinceUpdate: number
+}
+
+export interface LegacyIssue {
+  number: number
+  title: string
+  url: string
+  reactions: number
+  comments: number
+  area: string | null
+  summary: string | null
+  verdict: string
+  evidence: string | null
+  ageDays: number
+}
+
+export interface LegacyReviewResponse {
+  prs: LegacyPr[]
+  issues: LegacyIssue[]
+  counts: Record<string, number>
+  pendingScan: number
+  eolBranches: string[]
+}
+
+export async function fetchLegacyReview(verdict?: string): Promise<LegacyReviewResponse> {
+  const q = new URLSearchParams()
+  if (verdict) q.set('verdict', verdict)
+  const r = await fetch(`/api/legacy-review?${q}`)
+  if (!r.ok) throw new Error(`legacy-review: ${r.status}`)
+  return r.json()
+}
+
+export interface LegacyScanResult {
+  scanned: number
+  failed: number
+  legacyOnly: number
+  appliesToMain: number
+  unclear: number
+}
+
+export async function triggerLegacyScan(limit = 0): Promise<LegacyScanResult> {
+  const r = await post(`/api/legacy-scan?limit=${limit}`)
+  if (!r.ok) throw new Error(`legacy-scan: ${r.status}`)
+  return r.json()
+}
+
+// MVP 9 — "Ask the backlog" chat. The LLM routes questions to SQL-backed tools; cards are
+// the matched items in ItemView shape (rendered like every other item list); caveats are
+// honesty notes from the tools (e.g. "unique people" counts item authors).
+
+export interface ChatTurn {
+  role: 'user' | 'assistant'
+  content: string
+}
+
+export interface ChatResult {
+  reply: string
+  refused: boolean
+  toolsUsed: string[]
+  cards: ItemView[]
+  caveats: string[]
+  /** false = no backlog query ran, so the prose is not backed by data (shown as a warning) */
+  grounded: boolean
+}
+
+export interface ChatStatus {
+  dailyBudgetUsd: number
+  spentTodayUsd: number
+  turnsToday: number
+  budgetAvailable: boolean
+}
+
+export async function postChat(question: string, history: ChatTurn[]): Promise<ChatResult> {
+  const token = localStorage.getItem(ADMIN_TOKEN_KEY)
+  const r = await fetch('/api/chat', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { 'X-Admin-Token': token } : {}),
+    },
+    body: JSON.stringify({ question, history }),
+  })
+  if (r.status === 401) {
+    throw new Error('unauthorized — set the admin token via Admin → Set admin token')
+  }
+  if (r.status === 429) {
+    throw new Error('rate limited — too many questions right now, try again in a bit')
+  }
+  if (!r.ok) throw new Error(`chat: ${r.status}`)
+  return r.json()
+}
+
+export async function fetchChatStatus(): Promise<ChatStatus> {
+  const r = await fetch('/api/chat/status')
+  if (!r.ok) throw new Error(`chat-status: ${r.status}`)
+  return r.json()
+}
+
 export async function fetchDuplicates(params?: {
   type?: string
   limit?: number

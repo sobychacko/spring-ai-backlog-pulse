@@ -54,6 +54,21 @@ pulse:
     scheduled: false
     initial-delay: 2m
     interval: 10m
+  support:
+    # branches out of OSS support; drives the Legacy Review tab (PR base-branch match is
+    # deterministic, issue candidates are regex-gated then AI-assessed). 2.x-era EOLs are
+    # a config change here, no code change.
+    eol-branches:
+      - 1.0.x
+      - 1.1.x
+  chat:
+    # MVP 9 "Ask the backlog". public=false ⇒ POST /api/chat needs the admin token like every
+    # other POST; true ⇒ the one carve-out in AdminTokenFilter. Budget + rate limits apply in
+    # BOTH modes (operator use spends the same budget). Defaults calibrated pre-deploy.
+    public: false
+    daily-budget-usd: 1.0
+    questions-per-hour: 10
+    max-concurrent: 3
   classify:
     concurrency: 8
     # ~2k tokens of body is plenty for classification signal (cost guard)

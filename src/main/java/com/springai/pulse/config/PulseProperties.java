@@ -16,17 +16,34 @@
 
 package com.springai.pulse.config;
 
+import java.util.List;
+
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.bind.DefaultValue;
+import org.springframework.boot.context.properties.bind.Name;
 
 @ConfigurationProperties(prefix = "pulse")
-public record PulseProperties(Ingest ingest, Classify classify) {
+public record PulseProperties(Ingest ingest, Classify classify, Support support, Chat chat) {
 
 	public record Ingest(int pageSize) {
 	}
 
 	public record Classify(int concurrency, int maxBodyChars,
 			@DefaultValue("claude-sonnet-4-6") String sonnetModel, @DefaultValue("false") boolean dualModel) {
+	}
+
+	/** OSS support policy: branches whose items belong in the Legacy Review tab. */
+	public record Support(@DefaultValue({ "1.0.x", "1.1.x" }) List<String> eolBranches) {
+	}
+
+	/**
+	 * MVP 9 chat guardrails. {@code public} controls whether POST /api/chat is reachable
+	 * without the admin token (the one carve-out in {@code AdminTokenFilter}); the budget and
+	 * rate limits apply in BOTH modes — the operator's own use spends the same daily budget.
+	 */
+	public record Chat(@Name("public") @DefaultValue("false") boolean publicAccess,
+			@DefaultValue("1.0") double dailyBudgetUsd, @DefaultValue("10") int questionsPerHour,
+			@DefaultValue("3") int maxConcurrent) {
 	}
 
 }

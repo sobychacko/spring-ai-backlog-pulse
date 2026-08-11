@@ -41,6 +41,11 @@ import org.springframework.web.filter.OncePerRequestFilter;
  * it as the {@code X-Admin-Token} header (a custom header also forces a CORS preflight, which
  * kills cross-site drive-by POSTs). An empty token disables the guard for local single-user
  * use — with a loud warning.
+ *
+ * <p>ONE documented carve-out: when {@code pulse.chat.public=true}, POST /api/chat skips the
+ * token — it has its own guard chain (daily budget ceiling, per-IP rate limit, in-flight cap)
+ * so opening it bounds spend rather than exposing it. Every other endpoint keeps the token
+ * regardless.
  */
 @Component
 public class AdminTokenFilter extends OncePerRequestFilter {
@@ -49,8 +54,12 @@ public class AdminTokenFilter extends OncePerRequestFilter {
 
 	private final String token;
 
-	public AdminTokenFilter(@Value("${pulse.admin.token:}") String token) {
+	private final boolean chatPublic;
+
+	public AdminTokenFilter(@Value("${pulse.admin.token:}") String token,
+			@Value("${pulse.chat.public:false}") boolean chatPublic) {
 		this.token = token != null ? token : "";
+		this.chatPublic = chatPublic;
 		if (this.token.isBlank()) {
 			logger.warn("PULSE_ADMIN_TOKEN not set — POST /api endpoints are UNPROTECTED. "
 					+ "Fine locally; set it before deploying anywhere reachable.");
@@ -66,7 +75,8 @@ public class AdminTokenFilter extends OncePerRequestFilter {
 		response.setHeader("X-Content-Type-Options", "nosniff");
 		String method = request.getMethod();
 		boolean readOnly = "GET".equals(method) || "HEAD".equals(method) || "OPTIONS".equals(method);
-		if (!readOnly && request.getRequestURI().startsWith("/api/") && !this.token.isBlank()) {
+		boolean chatCarveOut = this.chatPublic && "/api/chat".equals(request.getRequestURI());
+		if (!readOnly && !chatCarveOut && request.getRequestURI().startsWith("/api/") && !this.token.isBlank()) {
 			String provided = request.getHeader("X-Admin-Token");
 			boolean ok = provided != null && MessageDigest.isEqual(this.token.getBytes(StandardCharsets.UTF_8),
 					provided.getBytes(StandardCharsets.UTF_8));
