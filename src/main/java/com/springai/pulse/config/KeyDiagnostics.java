@@ -35,12 +35,13 @@ public class KeyDiagnostics {
 		if (apiKey == null || apiKey.isBlank()) {
 			logger.warn("Anthropic API key: NOT SET");
 		}
-		else if (apiKey.length() <= 12) {
+		else if (apiKey.length() <= 8) {
 			logger.info("Anthropic API key in use: **** (length {})", apiKey.length());
 		}
 		else {
-			String masked = apiKey.substring(0, 8) + "…" + apiKey.substring(apiKey.length() - 4);
-			logger.info("Anthropic API key in use: {} (length {})", masked, apiKey.length());
+			// prefix only: the leading "sk-ant-…" is public key formatting, so it identifies
+			// which key is loaded without putting any secret material into the logs
+			logger.info("Anthropic API key in use: {}… (length {})", apiKey.substring(0, 8), apiKey.length());
 		}
 	}
 
