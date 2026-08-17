@@ -16,13 +16,15 @@ EXPOSE 8080
 # Memory-lean JVM defaults for a mostly-idle, single-instance dashboard. Without these the
 # JVM sizes its heap off the host (25% of an 8 GB box = 2 GB max heap) and G1 keeps whatever
 # it grabs, so resident memory — what Railway bills by the GB-minute — drifts to 2–3 GB.
-#   -Xmx640m / SerialGC + low HeapFreeRatio  → small heap that shrinks back after a burst
+#   -Xmx1g -Xmn64m / SerialGC + HeapFreeRatio → old gen large enough for startup, shrinks after
+#     (Spring AI reads the ~420 MB ONNX model into a byte[] on the heap once at boot; the
+#      app then forces a full GC on ApplicationReadyEvent to release it — see StartupHeapTrim)
 #   TieredStopAtLevel=1 + small code cache   → C1 only: less compiler/code-cache memory
 #   MaxMetaspace / Xss / MaxDirectMemory     → cap the other native pools
 #   ExitOnOutOfMemoryError                   → die (Railway restarts) instead of thrashing
 # The ONNX embedding model (~500 MB native) is the remaining fixed cost.
 # Override per deployment with the JAVA_OPTS env var (replaces the whole list).
-ENV JAVA_OPTS="-Xms96m -Xmx640m -XX:+UseSerialGC -XX:MinHeapFreeRatio=10 -XX:MaxHeapFreeRatio=25 \
+ENV JAVA_OPTS="-Xms96m -Xmx1g -Xmn64m -XX:+UseSerialGC -XX:MinHeapFreeRatio=10 -XX:MaxHeapFreeRatio=25 \
   -XX:TieredStopAtLevel=1 -XX:ReservedCodeCacheSize=48m -XX:MaxMetaspaceSize=160m \
   -Xss512k -XX:MaxDirectMemorySize=64m -XX:+ExitOnOutOfMemoryError"
 ENTRYPOINT ["sh", "-c", "exec java $JAVA_OPTS -jar app.jar"]
