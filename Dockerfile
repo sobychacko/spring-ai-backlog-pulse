@@ -7,10 +7,23 @@ COPY src ./src
 COPY frontend ./frontend
 RUN mvn -B -DskipTests package
 
+# Embedding model — fetched at build time so a cold boot never downloads it. Matters for
+# serverless deployments (Railway sleeps the service after 10 idle minutes; the ephemeral
+# filesystem cache would be lost), and it also makes every deploy's first boot faster.
+# Keep in sync with spring.ai.embedding.transformer.* in application.yml.
+FROM curlimages/curl:latest AS model
+ARG HF=https://huggingface.co/sentence-transformers/all-mpnet-base-v2/resolve/main
+RUN curl -fsSL -o /tmp/model.onnx     $HF/onnx/model.onnx \
+ && curl -fsSL -o /tmp/tokenizer.json $HF/tokenizer.json
+
 # Runtime — slim JRE 25
 FROM eclipse-temurin:25-jre
 WORKDIR /app
 COPY --from=build /app/target/backlog-pulse-*.jar app.jar
+COPY --from=model /tmp/model.onnx /tmp/tokenizer.json /app/models/
+# file: URIs bypass Spring AI's resource cache and are used in place
+ENV SPRING_AI_EMBEDDING_TRANSFORMER_ONNX_MODEL_URI=file:/app/models/model.onnx \
+    SPRING_AI_EMBEDDING_TRANSFORMER_TOKENIZER_URI=file:/app/models/tokenizer.json
 EXPOSE 8080
 
 # Memory-lean JVM defaults for a mostly-idle, single-instance dashboard. Without these the

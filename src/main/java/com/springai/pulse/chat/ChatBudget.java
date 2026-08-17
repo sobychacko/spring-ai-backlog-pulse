@@ -17,10 +17,11 @@
 package com.springai.pulse.chat;
 
 import java.time.LocalDate;
-import java.util.concurrent.atomic.AtomicReference;
+import java.util.Map;
 
 import com.springai.pulse.config.PulseProperties;
 
+import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Component;
 
 /**
@@ -30,21 +31,23 @@ import org.springframework.stereotype.Component;
  *
  * <p>Spend is tracked in micro-dollars at Claude Haiku 4.5 rates ($1/MTok in, $5/MTok out —
  * the same rates {@code LegacyReviewService} uses), so one input token = 1 µ$ and one output
- * token = 5 µ$. Day + spend live in a single atomically-swapped pair, making the midnight
- * reset race-free without locks. The check is optimistic (a turn that crosses the line still
- * completes), so the ceiling can overshoot by at most one turn (~1–3¢).
+ * token = 5 µ$. The ledger lives in the {@code chat_spend} table, one row per day, updated
+ * with an atomic upsert — so it survives restarts and serverless sleep/wake cycles, and is
+ * shared if the service ever runs more than one replica. The check is optimistic (a turn that
+ * crosses the line still completes), so the ceiling can overshoot by at most one turn (~1–3¢).
  */
 @Component
 public class ChatBudget {
 
-	private record DaySpend(LocalDate day, long microUsd, int turns) {
+	private record DaySpend(long microUsd, int turns) {
 	}
 
-	private final AtomicReference<DaySpend> spend = new AtomicReference<>(new DaySpend(LocalDate.now(), 0, 0));
+	private final NamedParameterJdbcTemplate jdbc;
 
 	private final double dailyBudgetUsd;
 
-	public ChatBudget(PulseProperties props) {
+	public ChatBudget(NamedParameterJdbcTemplate jdbc, PulseProperties props) {
+		this.jdbc = jdbc;
 		this.dailyBudgetUsd = props.chat().dailyBudgetUsd();
 	}
 
@@ -56,13 +59,12 @@ public class ChatBudget {
 	/** Record one completed turn's token usage against today's budget. */
 	public void record(long inTokens, long outTokens) {
 		long microUsd = inTokens + 5 * outTokens;
-		while (true) {
-			DaySpend current = today();
-			DaySpend next = new DaySpend(current.day(), current.microUsd() + microUsd, current.turns() + 1);
-			if (this.spend.compareAndSet(current, next)) {
-				return;
-			}
-		}
+		this.jdbc.update("""
+				insert into chat_spend (day, micro_usd, turns) values (:day, :micro, 1)
+				on conflict (day) do update
+				   set micro_usd = chat_spend.micro_usd + excluded.micro_usd,
+				       turns     = chat_spend.turns + 1
+				""", Map.of("day", LocalDate.now(), "micro", microUsd));
 	}
 
 	public double spentTodayUsd() {
@@ -77,18 +79,14 @@ public class ChatBudget {
 		return this.dailyBudgetUsd;
 	}
 
-	/** Today's counter, atomically resetting when the stored day is stale. */
+	/** Today's ledger row, or zero if nothing has been spent yet today. */
 	private DaySpend today() {
-		while (true) {
-			DaySpend current = this.spend.get();
-			if (current.day().equals(LocalDate.now())) {
-				return current;
-			}
-			DaySpend fresh = new DaySpend(LocalDate.now(), 0, 0);
-			if (this.spend.compareAndSet(current, fresh)) {
-				return fresh;
-			}
-		}
+		return this.jdbc
+			.query("select micro_usd, turns from chat_spend where day = :day", Map.of("day", LocalDate.now()),
+					(rs, i) -> new DaySpend(rs.getLong("micro_usd"), rs.getInt("turns")))
+			.stream()
+			.findFirst()
+			.orElse(new DaySpend(0, 0));
 	}
 
 }

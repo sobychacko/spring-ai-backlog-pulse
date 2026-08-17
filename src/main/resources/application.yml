@@ -9,6 +9,12 @@ spring:
     url: jdbc:postgresql://localhost:5432/pulse
     username: pulse
     password: pulse
+    hikari:
+      # Let the pool drain when idle: no idle connections ⇒ no background packets, so a
+      # serverless deployment (Railway "sleep after 10 min without outbound traffic") can
+      # actually go to sleep. First request after idle pays one connection open (~ms).
+      minimum-idle: 0
+      idle-timeout: 120000
   flyway:
     enabled: true
     baseline-on-migrate: true
