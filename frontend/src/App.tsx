@@ -142,7 +142,7 @@ export default function App() {
     setStatus('Scanning for duplicates…')
     try {
       const r = await triggerScanDuplicates()
-      setStatus(`Found ${r.candidates} duplicate/related candidates`)
+      setStatus(`Duplicate scan: ${r.added} new, ${r.candidates} open candidates`)
     } catch (e) {
       setStatus(`Scan error: ${e}`)
     }

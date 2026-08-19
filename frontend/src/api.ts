@@ -175,7 +175,9 @@ export async function triggerEmbed(): Promise<{ embedded: number; total: number 
   return r.json()
 }
 
-export async function triggerScanDuplicates(threshold = 0.75): Promise<{ candidates: number }> {
+export async function triggerScanDuplicates(
+  threshold = 0.75,
+): Promise<{ added: number; candidates: number }> {
   const r = await post(`/api/scan-duplicates?threshold=${threshold}`)
   if (!r.ok) throw new Error(`scan-duplicates: ${r.status}`)
   return r.json()

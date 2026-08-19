@@ -21,6 +21,7 @@ import java.util.Map;
 import com.springai.pulse.cluster.ClusterService;
 import com.springai.pulse.embed.DuplicateScanService;
 import com.springai.pulse.embed.EmbedService;
+import com.springai.pulse.persistence.ItemLinkRepository;
 
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -43,10 +44,14 @@ public class EmbedController {
 
 	private final ClusterService cluster;
 
-	public EmbedController(EmbedService embed, DuplicateScanService dupScan, ClusterService cluster) {
+	private final ItemLinkRepository links;
+
+	public EmbedController(EmbedService embed, DuplicateScanService dupScan, ClusterService cluster,
+			ItemLinkRepository links) {
 		this.embed = embed;
 		this.dupScan = dupScan;
 		this.cluster = cluster;
+		this.links = links;
 	}
 
 	/** Embed all unembedded items into the pgvector store. Free — local ONNX, no API cost. */
@@ -64,8 +69,9 @@ public class EmbedController {
 	@PostMapping("/scan-duplicates")
 	public Map<String, Object> scanDuplicates(@RequestParam(defaultValue = "0.85") double threshold) {
 		double t = Math.min(Math.max(threshold, 0.5), 0.99);
-		int candidates = this.dupScan.scan(t);
-		return Map.of("candidates", candidates, "threshold", t);
+		int added = this.dupScan.scan(t);
+		// "candidates" = what the Duplicates tab shows (pending, both sides open); "added" = new this run
+		return Map.of("added", added, "candidates", this.links.countPendingCandidates(null), "threshold", t);
 	}
 
 	/**

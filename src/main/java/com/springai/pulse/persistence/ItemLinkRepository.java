@@ -76,10 +76,13 @@ public class ItemLinkRepository {
 				""", params);
 	}
 
-	/** Returns the set of (from_number, to_number) pairs that already have a decided outcome. */
-	public Set<String> decidedPairs() {
+	/**
+	 * Every (from_number, to_number) pair that already has an embedding-derived link, decided
+	 * or pending — the scan skips these so re-scans only process new pairs.
+	 */
+	public Set<String> embeddingPairs() {
 		List<String> pairs = this.jdbc.getJdbcTemplate().query(
-				"select from_number || ':' || to_number from item_link where decided_at is not null",
+				"select from_number || ':' || to_number from item_link where source = 'embedding'",
 				(rs, n) -> rs.getString(1));
 		return new HashSet<>(pairs);
 	}

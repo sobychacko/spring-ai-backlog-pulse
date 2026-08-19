@@ -72,7 +72,10 @@ public class DuplicateScanService {
 
 	/**
 	 * Find candidate pairs in the vector store with similarity above {@code threshold} and
-	 * insert them into {@code item_link}.
+	 * insert them into {@code item_link}. Only pairs where both items are still open are
+	 * considered (closed items keep their embeddings for search, but a closed side resolves
+	 * the pair), and pairs already stored from an earlier scan are skipped — so a re-scan is
+	 * incremental: it only pays for genuinely new pairs.
 	 * @param threshold cosine similarity threshold (0–1); 0.85 is a good default
 	 * @return number of new candidates inserted
 	 */
@@ -84,13 +87,16 @@ public class DuplicateScanService {
 			return 0;
 		}
 
-		// 2. Skip pairs that already have a decided outcome.
-		Set<String> decided = this.links.decidedPairs();
+		// 2. Skip pairs already in item_link — decided or still pending. A pending pair is
+		// already surfaced in the review UI; re-inserting is a no-op and, for PR↔Issue pairs,
+		// would re-spend an LLM call every scan.
+		Set<String> known = this.links.embeddingPairs();
 		List<RawPair> pending = rawPairs.stream()
-			.filter(p -> !decided.contains(p.fromNum() + ":" + p.toNum())
-					&& !decided.contains(p.toNum() + ":" + p.fromNum()))
+			.filter(p -> !known.contains(p.fromNum() + ":" + p.toNum())
+					&& !known.contains(p.toNum() + ":" + p.fromNum()))
 			.toList();
-		logger.info("Duplicate scan: {} pairs after skipping already-decided", pending.size());
+		logger.info("Duplicate scan: {} new pairs after skipping {} already stored", pending.size(),
+				rawPairs.size() - pending.size());
 
 		// 3. Split by kind-pair and classify PR↔Issue pairs with LLM.
 		int inserted = 0;
@@ -194,6 +200,7 @@ public class DuplicateScanService {
 					    b.to_kind,
 					    b.sim                        as similarity
 					from vector_store a
+					join gh_item ga on ga.number = (a.metadata->>'number')::int and ga.state = 'open'
 					cross join lateral (
 					    select
 					        (metadata->>'number')    as to_num,
@@ -204,6 +211,7 @@ public class DuplicateScanService {
 					    order by embedding <=> a.embedding
 					    limit 6
 					) b
+					join gh_item gb on gb.number = (b.to_num)::int and gb.state = 'open'
 					where b.sim > ?
 					  and (a.metadata->>'number')::int < (b.to_num)::int
 					""", (rs, n) -> new RawPair(rs.getInt("from_num"), rs.getString("from_kind"),
