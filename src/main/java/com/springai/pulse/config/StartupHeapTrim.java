@@ -7,14 +7,17 @@ import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
 
 /**
- * Releases the startup-only heap spike once the app is up.
+ * Releases the startup heap spike once the app is up.
  *
- * <p>Spring AI's {@code TransformersEmbeddingModel} reads the whole ONNX model (~420 MB for
- * all-mpnet-base-v2) into a {@code byte[]} on the Java heap before handing it to ONNX Runtime,
- * which keeps its own native copy. The array is garbage immediately afterwards, but on a mostly
- * idle service the old generation may not be collected for hours, so that memory stays
- * committed and resident — and billed. One explicit full GC after {@link ApplicationReadyEvent}
- * lets the collector free it and (with a small {@code MaxHeapFreeRatio}) uncommit the pages.
+ * <p>On a mostly idle service the old generation may not be collected for hours, so startup
+ * garbage stays committed and resident — and billed. One explicit full GC after
+ * {@link ApplicationReadyEvent} lets the collector free it and (with a small
+ * {@code MaxHeapFreeRatio}) uncommit the pages.
+ *
+ * <p>The biggest single spike — {@code TransformersEmbeddingModel} reading the ~420 MB ONNX
+ * model into a {@code byte[]} before handing it to ONNX Runtime — no longer happens at boot
+ * (see {@link LazyEmbeddingConfig}); it now occurs on first embedding use and is reclaimed by
+ * the next full collection.
  */
 @Component
 public class StartupHeapTrim {

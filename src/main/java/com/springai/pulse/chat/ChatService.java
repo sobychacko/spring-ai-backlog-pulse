@@ -47,6 +47,7 @@ import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
+import org.springframework.context.annotation.Lazy;
 
 /**
  * MVP 9 "Ask the backlog": a metered chat turn behind a guard chain. The LLM is a router, not
@@ -126,7 +127,7 @@ public class ChatService {
 	private final SemanticSearchService semanticSearch;
 
 	public ChatService(ChatModel chatModel, ChatBudget budget, ChatRateLimiter rateLimiter, PulseProperties props,
-			VectorStore vectorStore, ChatToolsRepository toolsRepo, AnalyticsRepository analytics,
+			@Lazy VectorStore vectorStore, ChatToolsRepository toolsRepo, AnalyticsRepository analytics,
 			SemanticSearchService semanticSearch) {
 		this.chatModel = chatModel;
 		this.toolCallingManager = ToolCallingManager.builder().build();

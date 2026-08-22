@@ -32,6 +32,7 @@ import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Service;
+import org.springframework.context.annotation.Lazy;
 
 /**
  * Free-text search by meaning: the query string is embedded (local ONNX) and matched against
@@ -76,7 +77,7 @@ public class SemanticSearchService {
 
 	private final ObjectMapper objectMapper;
 
-	public SemanticSearchService(VectorStore vectorStore, NamedParameterJdbcTemplate jdbc,
+	public SemanticSearchService(@Lazy VectorStore vectorStore, NamedParameterJdbcTemplate jdbc,
 			ObjectMapper objectMapper) {
 		this.vectorStore = vectorStore;
 		this.jdbc = jdbc;

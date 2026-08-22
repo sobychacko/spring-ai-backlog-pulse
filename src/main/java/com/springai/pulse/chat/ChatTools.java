@@ -32,6 +32,7 @@ import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.annotation.ToolParam;
 import org.springframework.ai.vectorstore.SearchRequest;
 import org.springframework.ai.vectorstore.VectorStore;
+import org.springframework.context.annotation.Lazy;
 
 /**
  * The chat's tool surface — one instance per request. Each tool answers something only this
@@ -67,7 +68,7 @@ public class ChatTools {
 
 	private final LinkedHashSet<String> caveats = new LinkedHashSet<>();
 
-	public ChatTools(VectorStore vectorStore, ChatToolsRepository repo, AnalyticsRepository analytics,
+	public ChatTools(@Lazy VectorStore vectorStore, ChatToolsRepository repo, AnalyticsRepository analytics,
 			SemanticSearchService semanticSearch) {
 		this.vectorStore = vectorStore;
 		this.repo = repo;

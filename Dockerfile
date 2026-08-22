@@ -29,9 +29,9 @@ EXPOSE 8080
 # Memory-lean JVM defaults for a mostly-idle, single-instance dashboard. Without these the
 # JVM sizes its heap off the host (25% of an 8 GB box = 2 GB max heap) and G1 keeps whatever
 # it grabs, so resident memory — what Railway bills by the GB-minute — drifts to 2–3 GB.
-#   -Xmx1g -Xmn64m / SerialGC + HeapFreeRatio → old gen large enough for startup, shrinks after
-#     (Spring AI reads the ~420 MB ONNX model into a byte[] on the heap once at boot; the
-#      app then forces a full GC on ApplicationReadyEvent to release it — see StartupHeapTrim)
+#   -Xmx1g -Xmn64m / SerialGC + HeapFreeRatio → old gen sized for the transient ~420 MB byte[]
+#     Spring AI allocates when the ONNX model loads (lazily, on first embedding use — see
+#      LazyEmbeddingConfig); StartupHeapTrim GCs post-boot, later spikes shrink back via GC
 #   TieredStopAtLevel=1 + small code cache   → C1 only: less compiler/code-cache memory
 #   MaxMetaspace / Xss / MaxDirectMemory     → cap the other native pools
 #   ExitOnOutOfMemoryError                   → die (Railway restarts) instead of thrashing

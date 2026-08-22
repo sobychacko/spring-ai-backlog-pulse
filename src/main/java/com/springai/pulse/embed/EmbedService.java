@@ -33,6 +33,7 @@ import org.springframework.ai.document.Document;
 import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
+import org.springframework.context.annotation.Lazy;
 
 /**
  * Embeds every gh_item's title + body into the pgvector store using the local ONNX
@@ -56,7 +57,7 @@ public class EmbedService {
 
 	private final JdbcTemplate jdbc;
 
-	public EmbedService(VectorStore vectorStore, GhItemRepository items, JdbcTemplate jdbc) {
+	public EmbedService(@Lazy VectorStore vectorStore, GhItemRepository items, JdbcTemplate jdbc) {
 		this.vectorStore = vectorStore;
 		this.items = items;
 		this.jdbc = jdbc;
