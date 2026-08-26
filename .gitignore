@@ -18,3 +18,7 @@ PLAN.md
 
 # local database dump for deployment seeding
 *.dump
+
+# Frontend build output — Vite regenerates it into the jar on every Maven build
+# (frontend-maven-plugin at generate-resources); committing it only snapshots stale bundles.
+/src/main/resources/static/

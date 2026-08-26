@@ -5,6 +5,14 @@ server:
 spring:
   application:
     name: backlog-pulse
+  web:
+    resources:
+      cache:
+        cachecontrol:
+          # Revalidate static resources on every load (ETag/304 — cheap). Without this,
+          # browsers heuristically cache index.html and keep serving the previous UI after
+          # a deploy; the SPA bundle is content-hashed anyway, so correctness beats caching.
+          no-cache: true
   datasource:
     url: jdbc:postgresql://localhost:5432/pulse
     username: pulse
