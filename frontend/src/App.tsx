@@ -14,6 +14,7 @@ import {
   triggerSonnetClassify,
   triggerSync,
   type Facets,
+  triggerAdjudicate,
 } from './api'
 import { AskBacklog } from './pages/AskBacklog'
 import { ByFacet } from './pages/ByFacet'
@@ -183,6 +184,27 @@ export default function App() {
     }
   }
 
+  async function handleAdjudicate() {
+    setAdminOpen(false)
+    const ok = window.confirm(
+      'Adjudicate pending duplicate/competing-PR pairs with Haiku?\n' +
+      'One call per pair (~$0.50 for a full backfill); re-runs only touch new pairs.',
+    )
+    if (!ok) return
+    setStatus('Adjudicating candidate pairs…')
+    try {
+      const r = await triggerAdjudicate()
+      setStatus(
+        r.adjudicated === 0 && r.failed === 0
+          ? 'Adjudication: nothing to do (all pairs have verdicts)'
+          : `Adjudication: ${r.duplicate ?? 0} duplicate · ${r.related ?? 0} related · ${r.distinct ?? 0} distinct` +
+            (r.failed ? ` · ${r.failed} failed` : ''),
+      )
+    } catch (e) {
+      setStatus(`Adjudication error: ${e}`)
+    }
+  }
+
   async function handleLegacyScan() {
     setAdminOpen(false)
     const ok = window.confirm(
@@ -339,6 +361,12 @@ export default function App() {
                     className="block w-full px-4 py-2.5 text-left text-[13px] hover:bg-[#21262d]"
                   >
                     Scan for duplicates
+                  </button>
+                  <button
+                    onClick={handleAdjudicate}
+                    className="block w-full px-4 py-2.5 text-left text-[13px] hover:bg-[#21262d]"
+                  >
+                    Adjudicate duplicate pairs
                   </button>
                   <button
                     onClick={handleCluster}

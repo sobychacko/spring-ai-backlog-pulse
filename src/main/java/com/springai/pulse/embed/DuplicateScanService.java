@@ -17,8 +17,14 @@
 package com.springai.pulse.embed;
 
 import java.util.ArrayList;
+import java.util.EnumMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import com.springai.pulse.persistence.ItemLinkRepository;
 import org.slf4j.Logger;
@@ -170,7 +176,117 @@ public class DuplicateScanService {
 		}
 
 		logger.info("Duplicate scan complete: {} candidates inserted", inserted);
+
+		// 5. Adjudicate the new issue↔issue / PR↔PR candidates (see adjudicate()).
+		if (inserted > 0) {
+			adjudicate();
+		}
 		return inserted;
+	}
+
+	/** Verdict record for {@code ChatClient.entity()} — the enum constrains the model's output. */
+	public enum PairVerdict {
+
+		DUPLICATE, RELATED, DISTINCT
+
+	}
+
+	record Adjudication(PairVerdict verdict, String rationale) {
+	}
+
+	private static final String ADJUDICATE_SYSTEM = """
+			You judge whether two GitHub items from the Spring AI project are true duplicates.
+			Embedding similarity proposed this pair — your job is to correct it: similarity means
+			topical closeness, which is NOT the same as asking for the same thing.
+			Verdicts:
+			- DUPLICATE: the same underlying defect or request; closing one in favor of the
+			  other (or, for two PRs, merging only one) would lose nothing.
+			- RELATED: same topic or component, but materially different asks.
+			- DISTINCT: the similarity is superficial; these are different problems.
+			rationale: ONE short sentence naming the deciding sameness or difference, based only
+			on the text given — never invent facts.
+			""";
+
+	private static final int ADJUDICATE_BODY_CHARS = 2000;
+
+	private static final int ADJUDICATE_CONCURRENCY = 6;
+
+	/**
+	 * AI adjudication for pending issue↔issue and PR↔PR candidates that have no verdict yet:
+	 * one Haiku call per pair reading both items' title + body, producing
+	 * DUPLICATE | RELATED | DISTINCT plus a one-line rationale. AI-suggested — the review UI
+	 * shows it as a badge next to the similarity score and sorts DISTINCT pairs last; the
+	 * human confirm/dismiss decision remains the authority. PR↔Issue pairs already get their
+	 * LLM read during the scan (pr_fixes_issue vs related) and are skipped here.
+	 * @return count per verdict plus failures
+	 */
+	public Map<String, Integer> adjudicate() {
+		List<ItemLinkRepository.UnadjudicatedPair> pairs = this.links.findUnadjudicated(2000);
+		if (pairs.isEmpty()) {
+			logger.info("Adjudication: nothing to do");
+			return Map.of("adjudicated", 0, "failed", 0);
+		}
+		logger.info("Adjudicating {} candidate pairs with LLM…", pairs.size());
+		Map<PairVerdict, AtomicInteger> counts = new EnumMap<>(PairVerdict.class);
+		for (PairVerdict v : PairVerdict.values()) {
+			counts.put(v, new AtomicInteger());
+		}
+		AtomicInteger failed = new AtomicInteger();
+		ExecutorService pool = Executors.newFixedThreadPool(ADJUDICATE_CONCURRENCY);
+		try {
+			List<Future<?>> futures = new ArrayList<>();
+			for (ItemLinkRepository.UnadjudicatedPair pair : pairs) {
+				futures.add(pool.submit(() -> {
+					try {
+						Adjudication a = this.chat.prompt()
+							.system(ADJUDICATE_SYSTEM)
+							.user(adjudicatePrompt(pair))
+							.call()
+							.entity(Adjudication.class);
+						this.links.recordVerdict(pair.id(), a.verdict().name(), a.rationale(),
+								com.springai.pulse.domain.ModelIds.DEFAULT_CLASSIFIER);
+						counts.get(a.verdict()).incrementAndGet();
+					}
+					catch (Exception ex) {
+						failed.incrementAndGet();
+						logger.warn("Adjudication failed for pair {} (#{} / #{}): {}", pair.id(),
+								pair.from().number(), pair.to().number(), ex.getMessage());
+					}
+				}));
+			}
+			for (Future<?> f : futures) {
+				try {
+					f.get();
+				}
+				catch (Exception ignored) {
+					// per-pair failures already counted
+				}
+			}
+		}
+		finally {
+			pool.shutdown();
+		}
+		logger.info("Adjudication complete: {} duplicate, {} related, {} distinct, {} failed",
+				counts.get(PairVerdict.DUPLICATE).get(), counts.get(PairVerdict.RELATED).get(),
+				counts.get(PairVerdict.DISTINCT).get(), failed.get());
+		Map<String, Integer> result = new java.util.HashMap<>();
+		result.put("adjudicated", pairs.size() - failed.get());
+		result.put("duplicate", counts.get(PairVerdict.DUPLICATE).get());
+		result.put("related", counts.get(PairVerdict.RELATED).get());
+		result.put("distinct", counts.get(PairVerdict.DISTINCT).get());
+		result.put("failed", failed.get());
+		return result;
+	}
+
+	private String adjudicatePrompt(ItemLinkRepository.UnadjudicatedPair pair) {
+		return "PAIR TYPE: " + ("competing_pr".equals(pair.type()) ? "two pull requests" : "two issues") + "\n\n"
+				+ side("A", pair.from()) + "\n\n" + side("B", pair.to());
+	}
+
+	private String side(String label, ItemLinkRepository.PairSide item) {
+		String body = item.body().length() > ADJUDICATE_BODY_CHARS
+				? item.body().substring(0, ADJUDICATE_BODY_CHARS) + " …[truncated]" : item.body();
+		return "ITEM " + label + " — " + item.kind() + " #" + item.number() + ": " + item.title() + "\n" + body;
 	}
 
 	private String classifyPrIssue(ItemDetail pr, ItemDetail issue) {

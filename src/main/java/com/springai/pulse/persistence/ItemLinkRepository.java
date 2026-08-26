@@ -87,6 +87,69 @@ public class ItemLinkRepository {
 		return new HashSet<>(pairs);
 	}
 
+	/**
+	 * Record the human decision on a candidate pair: {@code confirmed=true} (real duplicate /
+	 * relationship) or {@code confirmed=false} with {@code decided_at} set (dismissed — not a
+	 * duplicate). Decided pairs leave the pending view permanently; the scan never re-inserts
+	 * a stored pair.
+	 * @return whether a pending embedding candidate with this id existed
+	 */
+	public boolean decide(long id, boolean confirmed) {
+		int n = this.jdbc.update("""
+				update item_link
+				   set confirmed = :confirmed, decided_by = 'admin', decided_at = now()
+				 where id = :id and source = 'embedding' and decided_at is null
+				""", new MapSqlParameterSource().addValue("id", id).addValue("confirmed", confirmed));
+		return n > 0;
+	}
+
+	/** Store the AI adjudication verdict for a pair (AI-suggested; never a human decision). */
+	public void recordVerdict(long id, String verdict, String rationale, String model) {
+		this.jdbc.update("""
+				update item_link
+				   set verdict = :verdict, verdict_rationale = :rationale, verdict_model = :model,
+				       verdict_at = now()
+				 where id = :id
+				""",
+				new MapSqlParameterSource().addValue("id", id)
+					.addValue("verdict", verdict)
+					.addValue("rationale", rationale)
+					.addValue("model", model));
+	}
+
+	/** Pending issue↔issue / PR↔PR candidates that have no adjudication verdict yet. */
+	public List<UnadjudicatedPair> findUnadjudicated(int limit) {
+		return this.jdbc.getJdbcTemplate().query("""
+				select il.id, il.type,
+				       fa.number as from_num, fa.kind as from_kind, fa.title as from_title,
+				       coalesce(fa.body, '') as from_body,
+				       ta.number as to_num, ta.kind as to_kind, ta.title as to_title,
+				       coalesce(ta.body, '') as to_body
+				from item_link il
+				join gh_item fa on fa.number = il.from_number
+				join gh_item ta on ta.number = il.to_number
+				where il.source = 'embedding'
+				  and il.decided_at is null
+				  and il.verdict is null
+				  and il.type in ('duplicate_candidate', 'competing_pr')
+				  and fa.state = 'open' and ta.state = 'open'
+				order by il.confidence desc
+				limit ?
+				""",
+				(rs, n) -> new UnadjudicatedPair(rs.getLong("id"), rs.getString("type"),
+						new PairSide(rs.getInt("from_num"), rs.getString("from_kind"),
+								rs.getString("from_title"), rs.getString("from_body")),
+						new PairSide(rs.getInt("to_num"), rs.getString("to_kind"), rs.getString("to_title"),
+								rs.getString("to_body"))),
+				limit);
+	}
+
+	public record PairSide(int number, String kind, String title, String body) {
+	}
+
+	public record UnadjudicatedPair(long id, String type, PairSide from, PairSide to) {
+	}
+
 	/** The only link types that exist — user-supplied type filters must match one exactly. */
 	private static final java.util.Set<String> LINK_TYPES = java.util.Set.of("duplicate_candidate", "competing_pr",
 			"pr_fixes_issue", "related", "closes", "references");
@@ -100,7 +163,7 @@ public class ItemLinkRepository {
 		String modelClause = "and %s.model_used = '" + com.springai.pulse.domain.ModelIds.DEFAULT_CLASSIFIER + "'";
 		return this.jdbc.getJdbcTemplate().query("""
 				select
-				    il.id, il.type, il.confidence, il.source,
+				    il.id, il.type, il.confidence, il.source, il.verdict, il.verdict_rationale,
 				    fa.number as from_num, fa.kind as from_kind, fa.title as from_title,
 				    fa.url as from_url, fc.area as from_area, fc.summary as from_summary,
 				    ta.number as to_num, ta.kind as to_kind, ta.title as to_title,
@@ -114,11 +177,12 @@ public class ItemLinkRepository {
 				  and il.decided_at is null
 				  and fa.state = 'open' and ta.state = 'open'
 				  %s
-				order by il.confidence desc, il.id
+				order by case when il.verdict = 'DISTINCT' then 1 else 0 end, il.confidence desc, il.id
 				limit ? offset ?
 				""".formatted(modelClause.formatted("fc"), modelClause.formatted("tc"), typeClause),
 				(rs, n) -> new DuplicatePairView(rs.getLong("id"), rs.getString("type"),
-				rs.getDouble("confidence"), rs.getString("source"),
+				rs.getDouble("confidence"), rs.getString("source"), rs.getString("verdict"),
+				rs.getString("verdict_rationale"),
 				new DuplicateItemView(rs.getInt("from_num"), rs.getString("from_kind"),
 						rs.getString("from_title"), rs.getString("from_url"), rs.getString("from_area"),
 						rs.getString("from_summary")),
@@ -167,7 +231,7 @@ public class ItemLinkRepository {
 	}
 
 	public record DuplicatePairView(long id, String type, double confidence, String source,
-			DuplicateItemView from, DuplicateItemView to) {
+			String verdict, String verdictRationale, DuplicateItemView from, DuplicateItemView to) {
 	}
 
 }

@@ -356,6 +356,9 @@ export interface DuplicatePair {
   type: string
   confidence: number
   source: string
+  /** AI adjudication (Haiku read both items): DUPLICATE | RELATED | DISTINCT, or null if not yet run */
+  verdict: string | null
+  verdictRationale: string | null
   from: DuplicateItemDetail
   to: DuplicateItemDetail
 }
@@ -474,6 +477,26 @@ export async function postChat(question: string, history: ChatTurn[]): Promise<C
 export async function fetchChatStatus(): Promise<ChatStatus> {
   const r = await fetch('/api/chat/status')
   if (!r.ok) throw new Error(`chat-status: ${r.status}`)
+  return r.json()
+}
+
+/** Confirm (true) or dismiss (false) a candidate pair — admin token required on deployed instances. */
+export async function decideDuplicate(id: number, confirmed: boolean): Promise<void> {
+  const r = await post(`/api/duplicates/${id}/decide?confirmed=${confirmed}`)
+  if (!r.ok) throw new Error(`decide: ${r.status}`)
+}
+
+export interface AdjudicateResult {
+  adjudicated: number
+  duplicate?: number
+  related?: number
+  distinct?: number
+  failed: number
+}
+
+export async function triggerAdjudicate(): Promise<AdjudicateResult> {
+  const r = await post('/api/adjudicate-duplicates')
+  if (!r.ok) throw new Error(`adjudicate-duplicates: ${r.status}`)
   return r.json()
 }
 

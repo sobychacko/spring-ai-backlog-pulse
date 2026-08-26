@@ -31,6 +31,8 @@ import com.springai.pulse.persistence.ItemLinkRepository;
 import com.springai.pulse.persistence.ReadModelRepository;
 import com.springai.pulse.search.SemanticSearchService;
 
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -142,6 +144,21 @@ public class DashboardController {
 		var pairs = this.links.findPendingCandidates(type, safeLimit, safeOffset);
 		long total = this.links.countPendingCandidates(type);
 		return Map.of("pairs", pairs, "total", total);
+	}
+
+	/**
+	 * Human decision on a candidate pair: confirm (real duplicate/relationship) or dismiss
+	 * (not a duplicate — the false-positive escape hatch). POST, so the admin token filter
+	 * gates it on deployed instances. Decided pairs leave the review permanently.
+	 */
+	@PostMapping("/duplicates/{id}/decide")
+	public ResponseEntity<Map<String, Object>> decideDuplicate(@PathVariable long id,
+			@RequestParam boolean confirmed) {
+		boolean updated = this.links.decide(id, confirmed);
+		if (!updated) {
+			return ResponseEntity.status(404).body(Map.of("error", "no pending candidate with id " + id));
+		}
+		return ResponseEntity.ok(Map.of("id", id, "confirmed", confirmed));
 	}
 
 	@GetMapping("/prs")

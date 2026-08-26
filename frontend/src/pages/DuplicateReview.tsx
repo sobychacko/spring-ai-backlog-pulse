@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import {
+  decideDuplicate,
   fetchDuplicates,
+  hasAdminToken,
   type DuplicateItemDetail,
   type DuplicatePair,
 } from '../api'
@@ -65,9 +67,30 @@ function ItemPanel({ item }: { item: DuplicateItemDetail }) {
   )
 }
 
-function PairCard({ pair }: { pair: DuplicatePair }) {
+const VERDICT_META: Record<string, { label: string; color: string }> = {
+  DUPLICATE: { label: 'AI: duplicate', color: 'border-danger text-danger' },
+  RELATED: { label: 'AI: related', color: 'border-subtle text-subtle' },
+  DISTINCT: { label: 'AI: distinct', color: 'border-success text-success' },
+}
+
+function PairCard({ pair, onDecided }: { pair: DuplicatePair; onDecided: (id: number) => void }) {
   const meta = TYPE_LABELS[pair.type] ?? { label: pair.type, color: 'border-edge text-subtle', hint: '' }
   const pct = Math.round(pair.confidence * 100)
+  const verdict = pair.verdict ? VERDICT_META[pair.verdict] : null
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  async function decide(confirmed: boolean) {
+    setBusy(true)
+    setError(null)
+    try {
+      await decideDuplicate(pair.id, confirmed)
+      onDecided(pair.id)
+    } catch (e) {
+      setError(String(e))
+      setBusy(false)
+    }
+  }
 
   return (
     <div className="rounded-lg border border-edge bg-surface p-4 space-y-3">
@@ -80,7 +103,41 @@ function PairCard({ pair }: { pair: DuplicatePair }) {
         <span className="rounded-full border border-edge px-2 py-0.5 text-[11px] text-subtle capitalize">
           {pair.source === 'embedding' ? '⊕ embedding' : '⊙ GH ref'}
         </span>
+        {verdict && (
+          <span className={`rounded-full border px-2 py-0.5 text-[11px] ${verdict.color}`}>
+            {verdict.label}
+          </span>
+        )}
+        {hasAdminToken() && (
+          <span className="ml-auto flex gap-1.5">
+            <button
+              onClick={() => decide(true)}
+              disabled={busy}
+              className="rounded-md border border-success/60 px-2.5 py-0.5 text-[11px] text-success hover:bg-success/10 disabled:opacity-40"
+              title="Mark as a real duplicate/relationship (removes from this list)"
+            >
+              ✓ Confirm
+            </button>
+            <button
+              onClick={() => decide(false)}
+              disabled={busy}
+              className="rounded-md border border-edge px-2.5 py-0.5 text-[11px] text-subtle hover:text-body hover:bg-[#21262d] disabled:opacity-40"
+              title="Not a duplicate — dismiss permanently"
+            >
+              ✕ Dismiss
+            </button>
+          </span>
+        )}
       </div>
+
+      {/* AI verdict rationale */}
+      {pair.verdictRationale && (
+        <p className="text-[11px] text-subtle italic border-l-2 border-edge pl-2">
+          AI-suggested: {pair.verdictRationale}
+        </p>
+      )}
+
+      {error && <p className="text-[11px] text-danger">{error}</p>}
 
       {/* Hint */}
       {meta.hint && (
@@ -139,10 +196,11 @@ export function DuplicateReview() {
         <h2 className="text-[15px] font-semibold">Duplicates</h2>
         <p className="mt-1 text-[12px] text-subtle">
           AI-suggested candidate pairs, grouped by relationship type — only pairs where both
-          items are still open. This view is <strong className="text-body">read-only</strong>:
-          resolve true duplicates on GitHub (close one of the issues) and run{' '}
-          <strong className="text-body">Admin → Sync</strong> to clear resolved pairs. Nothing
-          here ever writes to GitHub.
+          items are still open. Resolve true duplicates on GitHub (close one of the issues) and
+          run <strong className="text-body">Admin → Sync</strong> to clear resolved pairs; with
+          the admin token set you can also <strong className="text-body">Confirm</strong> a pair
+          or <strong className="text-body">Dismiss</strong> a false positive here. Nothing ever
+          writes to GitHub.
         </p>
       </div>
 
@@ -179,7 +237,14 @@ export function DuplicateReview() {
       ) : (
         <div className="space-y-3">
           {pairs.map((p) => (
-            <PairCard key={p.id} pair={p} />
+            <PairCard
+              key={p.id}
+              pair={p}
+              onDecided={(id) => {
+                setPairs((prev) => prev.filter((x) => x.id !== id))
+                setTotal((t) => t - 1)
+              }}
+            />
           ))}
         </div>
       )}

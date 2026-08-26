@@ -75,6 +75,16 @@ public class EmbedController {
 	}
 
 	/**
+	 * AI adjudication for pending duplicate/competing-PR pairs that have no verdict yet (one
+	 * Haiku call per pair — the scan already adjudicates its own new pairs, so this is the
+	 * backfill / retry entry point).
+	 */
+	@PostMapping("/adjudicate-duplicates")
+	public Map<String, Integer> adjudicateDuplicates() {
+		return this.dupScan.adjudicate();
+	}
+
+	/**
 	 * Rebuild theme clusters from the similarity graph. Free for the graph step; uses
 	 * one Haiku call per cluster for naming.
 	 */
