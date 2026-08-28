@@ -86,6 +86,9 @@ public class DuplicateScanService {
 	 * @return number of new candidates inserted
 	 */
 	public int scan(double threshold) {
+		// clamp here so every caller (endpoint, pipeline, config typo) gets the same floor —
+		// below ~0.5 nearly all pairs match and each new pair costs an adjudication call
+		threshold = Math.min(Math.max(threshold, 0.5), 0.99);
 		// 1. Fetch raw similar pairs from pgvector via a single lateral-join query.
 		List<RawPair> rawPairs = fetchRawPairs(threshold);
 		logger.info("Duplicate scan: found {} raw pairs above threshold {}", rawPairs.size(), threshold);
@@ -220,7 +223,7 @@ public class DuplicateScanService {
 	 * LLM read during the scan (pr_fixes_issue vs related) and are skipped here.
 	 * @return count per verdict plus failures
 	 */
-	public Map<String, Integer> adjudicate() {
+	public synchronized Map<String, Integer> adjudicate() {
 		List<ItemLinkRepository.UnadjudicatedPair> pairs = this.links.findUnadjudicated(2000);
 		if (pairs.isEmpty()) {
 			logger.info("Adjudication: nothing to do");

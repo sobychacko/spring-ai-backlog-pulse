@@ -70,7 +70,7 @@ public class PipelineService {
 
 	private final ClusterService cluster;
 
-	private final PulseProperties props;
+	private final PulseProperties.Pipeline pipelineProps;
 
 	private final AtomicBoolean running = new AtomicBoolean(false);
 
@@ -91,7 +91,10 @@ public class PipelineService {
 		this.dupScan = dupScan;
 		this.legacy = legacy;
 		this.cluster = cluster;
-		this.props = props;
+		// pulse.pipeline binds to null when the whole block is absent (per-component defaults
+		// only apply once the record itself binds) — fall back to the documented defaults
+		this.pipelineProps = props.pipeline() != null ? props.pipeline()
+				: new PulseProperties.Pipeline(0.75, 10);
 	}
 
 	/**
@@ -121,13 +124,13 @@ public class PipelineService {
 		step(summary, "sync", () -> this.backfill.syncNow() ? this.backfill.lastSyncResult()
 				: "skipped (sync already running)");
 
-		int[] embedded = { 0 };
+		int[] embedded = { -1 };
 		step(summary, "embed", () -> {
 			embedded[0] = this.embed.embedAll();
 			return embedded[0] + " new";
 		});
 
-		step(summary, "scan", () -> this.dupScan.scan(this.props.pipeline().scanThreshold()) + " new pairs");
+		step(summary, "scan", () -> this.dupScan.scan(this.pipelineProps.scanThreshold()) + " new pairs");
 
 		step(summary, "adjudicate", () -> {
 			Map<String, Integer> a = this.dupScan.adjudicate();
@@ -139,9 +142,14 @@ public class PipelineService {
 			return r.scanned() + " scanned" + (r.failed() > 0 ? ", " + r.failed() + " failed" : "");
 		});
 
-		int minNew = this.props.pipeline().clusterMinNewItems();
-		step(summary, "clusters", () -> embedded[0] >= minNew ? this.cluster.buildClusters() + " built"
-				: "skipped (" + embedded[0] + " new < " + minNew + ")");
+		int minNew = this.pipelineProps.clusterMinNewItems();
+		step(summary, "clusters", () -> {
+			if (embedded[0] < 0) {
+				return "skipped (embed step failed)";
+			}
+			return embedded[0] >= minNew ? this.cluster.buildClusters() + " built"
+					: "skipped (" + embedded[0] + " new < " + minNew + ")";
+		});
 
 		long secs = (System.currentTimeMillis() - start) / 1000;
 		this.lastResult = summary + "(" + secs + "s)";

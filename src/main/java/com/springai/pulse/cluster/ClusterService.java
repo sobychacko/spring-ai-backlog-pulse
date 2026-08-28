@@ -98,7 +98,7 @@ public class ClusterService {
 	 * Rebuild the cluster tables from the current vector store contents.
 	 * @return number of clusters written
 	 */
-	public int buildClusters() {
+	public synchronized int buildClusters() {
 		// 1. Fetch all embedded item numbers
 		List<Integer> allItems = fetchAllItemNumbers();
 		if (allItems.isEmpty()) {

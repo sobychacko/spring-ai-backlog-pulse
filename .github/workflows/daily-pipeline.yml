@@ -1,6 +1,7 @@
 # Kicks the app's daily refresh chain (sync → classify → embed → duplicate scan/adjudicate →
 # legacy scan → gated cluster rebuild). The deployment is serverless: this request is what
-# wakes it, so the first attempt may hit a cold boot (502) — hence the retry loop.
+# wakes it, so the first attempt may hit a cold boot (502) — hence the retry loop. Auth
+# failures are deterministic and fail immediately instead of retrying.
 #
 # Required repository secrets:
 #   PULSE_APP_URL      e.g. https://<app>.up.railway.app   (no trailing slash)
@@ -21,18 +22,20 @@ jobs:
           for attempt in 1 2 3 4; do
             code=$(curl -s -o /tmp/body -w '%{http_code}' --max-time 60 -X POST \
               -H "X-Admin-Token: ${{ secrets.PULSE_ADMIN_TOKEN }}" \
-              "${{ secrets.PULSE_APP_URL }}/api/pipeline" || echo 000)
+              "${{ secrets.PULSE_APP_URL }}/api/pipeline") || code=000
             echo "attempt $attempt: HTTP $code"
-            if [ "$code" = "202" ]; then
-              echo "pipeline started"
-              exit 0
-            fi
-            if [ "$code" = "409" ]; then
-              echo "a run is already in progress — treating as success"
-              exit 0
-            fi
+            case "$code" in
+              202) echo "pipeline started"; exit 0 ;;
+              409) echo "a run is already in progress — treating as success"; exit 0 ;;
+              401|403|404)
+                echo "deterministic failure (check PULSE_APP_URL / PULSE_ADMIN_TOKEN secrets)"
+                cat /tmp/body || true
+                exit 1 ;;
+            esac
             cat /tmp/body || true
-            sleep 45   # cold boot / transient — wait and retry
+            if [ "$attempt" -lt 4 ]; then
+              sleep 45   # cold boot / transient — wait and retry
+            fi
           done
           echo "pipeline trigger failed after 4 attempts"
           exit 1

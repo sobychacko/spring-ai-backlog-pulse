@@ -29,12 +29,7 @@ spring:
   ai:
     anthropic:
       api-key: ${ANTHROPIC_API_KEY:}
-      pipeline:
-    # daily refresh chain (POST /api/pipeline, kicked by the GitHub Actions cron):
-    # duplicate-scan threshold + how many new items a run must embed before clusters rebuild
-    scan-threshold: 0.75
-    cluster-min-new-items: 10
-  chat:
+      chat:
         options:
           model: claude-haiku-4-5
           max-tokens: 1024

@@ -46,12 +46,15 @@ public class EmbedController {
 
 	private final ItemLinkRepository links;
 
+	private final com.springai.pulse.config.PulseProperties props;
+
 	public EmbedController(EmbedService embed, DuplicateScanService dupScan, ClusterService cluster,
-			ItemLinkRepository links) {
+			ItemLinkRepository links, com.springai.pulse.config.PulseProperties props) {
 		this.embed = embed;
 		this.dupScan = dupScan;
 		this.cluster = cluster;
 		this.links = links;
+		this.props = props;
 	}
 
 	/** Embed all unembedded items into the pgvector store. Free — local ONNX, no API cost. */
@@ -67,8 +70,11 @@ public class EmbedController {
 	 * co-occurrence). Pass {@code threshold} to override the default 0.85.
 	 */
 	@PostMapping("/scan-duplicates")
-	public Map<String, Object> scanDuplicates(@RequestParam(defaultValue = "0.85") double threshold) {
-		double t = Math.min(Math.max(threshold, 0.5), 0.99);
+	public Map<String, Object> scanDuplicates(@RequestParam(required = false) Double threshold) {
+		// default comes from pulse.pipeline.scan-threshold so manual and scheduled scans agree;
+		// the service clamps to [0.5, 0.99]
+		double t = threshold != null ? threshold
+				: (this.props.pipeline() != null ? this.props.pipeline().scanThreshold() : 0.75);
 		int added = this.dupScan.scan(t);
 		// "candidates" = what the Duplicates tab shows (pending, both sides open); "added" = new this run
 		return Map.of("added", added, "candidates", this.links.countPendingCandidates(null), "threshold", t);

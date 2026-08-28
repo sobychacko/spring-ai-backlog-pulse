@@ -173,6 +173,12 @@ public class BackfillService {
 	 * @return false if a sync was already running (the step is skipped, not queued)
 	 */
 	public boolean syncNow() {
+		if (this.running.get()) {
+			// a full backfill owns ingest+classify right now; running a sync concurrently would
+			// double-classify pending rows and race the cursor (the async path avoids this by
+			// sharing the single worker thread)
+			return false;
+		}
 		if (!this.syncRunning.compareAndSet(false, true)) {
 			return false;
 		}

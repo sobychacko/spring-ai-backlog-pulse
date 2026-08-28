@@ -188,25 +188,37 @@ export default function App() {
 
   async function handlePipeline() {
     setAdminOpen(false)
+    const ok = window.confirm(
+      'Run the full refresh chain (sync → embed → scan → adjudicate → legacy → clusters)?\n' +
+      'Metered like the individual actions; cents per run at normal inflow.',
+    )
+    if (!ok) return
     setStatus('Pipeline running… (sync → embed → scan → adjudicate → legacy → clusters)')
     try {
       const r = await triggerPipeline()
       if (!r.started) {
         setStatus('Pipeline already running — watching…')
       }
-      // poll until the run finishes, then show its summary
-      for (let i = 0; i < 120; i++) {
-        await new Promise((res) => setTimeout(res, 5000))
+    } catch (e) {
+      setStatus(`Pipeline error: ${e}`)
+      return
+    }
+    // poll until the run finishes, then show its summary; transient poll failures
+    // (serverless 502s) are tolerated rather than aborting the watch
+    for (let i = 0; i < 120; i++) {
+      await new Promise((res) => setTimeout(res, 5000))
+      try {
         const st = await fetchPipelineStatus()
         if (!st.running) {
           setStatus(`Pipeline: ${st.lastResult}`)
+          loadFacets()
           return
         }
+      } catch {
+        // transient — keep watching
       }
-      setStatus('Pipeline still running — see /api/pipeline/status')
-    } catch (e) {
-      setStatus(`Pipeline error: ${e}`)
     }
+    setStatus('Pipeline still running — see /api/pipeline/status')
   }
 
   async function handleAdjudicate() {
