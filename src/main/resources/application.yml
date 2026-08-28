@@ -67,12 +67,6 @@ pulse:
     token: ${PULSE_ADMIN_TOKEN:}
   ingest:
     page-size: 100
-  sync:
-    # set true to enable the scheduled incremental sync (the hands-off "live" mode);
-    # false = sync runs only manually via Admin → Sync / POST /api/sync
-    scheduled: false
-    initial-delay: 2m
-    interval: 10m
   support:
     # branches out of OSS support; drives the Legacy Review tab (PR base-branch match is
     # deterministic, issue candidates are regex-gated then AI-assessed). 2.x-era EOLs are
