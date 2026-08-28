@@ -22,6 +22,7 @@ import java.security.NoSuchAlgorithmException;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.regex.Matcher;
@@ -112,12 +113,12 @@ public class IngestService {
 			return new IngestResult(0, cursor);
 		}
 		String latestUpdatedAt = cursor;
-		boolean sawPr = false;
+		Set<Integer> touchedPrs = new LinkedHashSet<>();
 		for (JsonNode node : nodes) {
 			GhItem item = map(node);
 			this.items.upsert(item);
 			if (item.kind() == ItemKind.PR) {
-				sawPr = true;
+				touchedPrs.add(item.number());
 				if (item.body() != null) {
 					parseLinks(item.number(), item.body());
 				}
@@ -127,9 +128,7 @@ public class IngestService {
 				latestUpdatedAt = updatedAt;
 			}
 		}
-		if (sawPr) {
-			ingestPrBaseBranches();
-		}
+		refreshPrBaseBranches(touchedPrs);
 		logger.info("Incremental ingest since {}: {} item(s), latest updated_at={}", cursor, nodes.size(), latestUpdatedAt);
 		return new IngestResult(nodes.size(), latestUpdatedAt);
 	}
@@ -179,6 +178,37 @@ public class IngestService {
 				n.path("reactions").path("total_count").asInt(0), labels, text(n, "html_url"),
 				isPr ? n.path("draft").asBoolean(false) : null, null, contentHash(title, body), prBaseBranch,
 				assignees);
+	}
+
+	/**
+	 * Refresh {@code pr_base_branch} for just the PRs an incremental sync touched — one
+	 * {@code /pulls/N} call each. Retargeting a PR bumps its {@code updated_at}, so any base
+	 * change is guaranteed to appear in the sync window; the full listing (a few hundred
+	 * per-row updates, most of a sync's wall time) is reserved for backfills and large deltas.
+	 */
+	private void refreshPrBaseBranches(Set<Integer> prNumbers) {
+		if (prNumbers.isEmpty()) {
+			return;
+		}
+		if (prNumbers.size() > 50) {
+			ingestPrBaseBranches();
+			return;
+		}
+		int updated = 0;
+		for (int number : prNumbers) {
+			try {
+				JsonNode pr = this.client.fetchPullRequest(number);
+				String ref = pr != null ? text(pr.path("base"), "ref") : null;
+				if (ref != null) {
+					this.items.updatePrBaseBranch(number, ref);
+					updated++;
+				}
+			}
+			catch (Exception ex) {
+				logger.warn("Base-branch refresh failed for PR #{}: {}", number, ex.getMessage());
+			}
+		}
+		logger.info("PR base branches refreshed for {} synced PR(s)", updated);
 	}
 
 	/**

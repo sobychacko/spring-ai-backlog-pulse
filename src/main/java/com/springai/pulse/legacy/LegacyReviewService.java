@@ -32,6 +32,7 @@ import com.springai.pulse.domain.LegacyVerdict;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.springframework.ai.converter.BeanOutputConverter;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.beans.factory.annotation.Value;
@@ -172,10 +173,14 @@ public class LegacyReviewService {
 			if (body.length() > max) {
 				body = body.substring(0, max);
 			}
-			String user = "Title: " + candidate.title() + "\n\nBody:\n" + body;
-			var response = this.chat.prompt().system(system).user(user).call().responseEntity(LegacyAssessment.class);
-			LegacyAssessment result = response.getEntity();
-			accumulateUsage(response.getResponse(), inTokens, outTokens);
+			var converter = new BeanOutputConverter<>(LegacyAssessment.class);
+			String user = "Title: " + candidate.title() + "\n\nBody:\n" + body + "\n\n" + converter.getFormat();
+			var response = this.chat.prompt().system(system).user(user).call().chatResponse();
+			accumulateUsage(response, inTokens, outTokens);
+			// Haiku occasionally wraps the JSON in a markdown code fence or a line of prose;
+			// cut to the outermost object before converting instead of failing the item forever
+			// (a failed item has no row, so it would be retried — and re-fail — every run)
+			LegacyAssessment result = converter.convert(extractJsonObject(response.getResult().getOutput().getText()));
 			if (result == null) {
 				failed.incrementAndGet();
 				return;
@@ -193,6 +198,16 @@ public class LegacyReviewService {
 			failed.incrementAndGet();
 			logger.warn("Legacy assessment failed for #{}: {}", candidate.number(), ex.getMessage());
 		}
+	}
+
+	/** Cut model output down to the outermost JSON object, tolerating fences and prose. */
+	private static String extractJsonObject(String text) {
+		int start = text.indexOf('{');
+		int end = text.lastIndexOf('}');
+		if (start < 0 || end <= start) {
+			throw new IllegalStateException("no JSON object in model output");
+		}
+		return text.substring(start, end + 1);
 	}
 
 	/**

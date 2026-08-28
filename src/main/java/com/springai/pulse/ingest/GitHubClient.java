@@ -70,6 +70,14 @@ public class GitHubClient {
 		return fetchAll("/repos/" + this.props.repo() + "/pulls?state=open&per_page=" + pageSize);
 	}
 
+	/** Fetch a single pull request (for targeted base-branch refresh during incremental sync). */
+	public JsonNode fetchPullRequest(int number) {
+		return this.rest.get()
+			.uri("/repos/" + this.props.repo() + "/pulls/" + number)
+			.retrieve()
+			.body(JsonNode.class);
+	}
+
 	/**
 	 * Fetch all items (open and closed) updated at or after {@code since}, sorted ascending by
 	 * update time so the caller can advance the cursor to the last item seen.

@@ -7,6 +7,16 @@ COPY src ./src
 COPY frontend ./frontend
 RUN mvn -B -DskipTests package
 
+# Warm DJL's native cache: the embedding path needs DJL's PyTorch engine (NDArray backend for
+# the tokenizer output), and on first use DJL downloads ~150 MB of libtorch natives — per cold
+# boot on an ephemeral filesystem. Triggering engine init here (DJL's own download logic, so
+# the cache layout is guaranteed right) bakes them into the image instead.
+RUN printf 'public class WarmDjl { public static void main(String[] a) { ai.djl.engine.Engine.getEngine("PyTorch"); } }' > WarmDjl.java \
+ && mvn -B -q dependency:build-classpath -Dmdep.outputFile=/tmp/cp.txt \
+ && javac -cp "$(cat /tmp/cp.txt)" WarmDjl.java \
+ && DJL_CACHE_DIR=/opt/djl-cache java -cp ".:$(cat /tmp/cp.txt)" WarmDjl \
+ && ls /opt/djl-cache/pytorch
+
 # Embedding model — fetched at build time so a cold boot never downloads it. Matters for
 # serverless deployments (Railway sleeps the service after 10 idle minutes; the ephemeral
 # filesystem cache would be lost), and it also makes every deploy's first boot faster.
@@ -21,9 +31,12 @@ FROM eclipse-temurin:25-jre
 WORKDIR /app
 COPY --from=build /app/target/backlog-pulse-*.jar app.jar
 COPY --from=model /tmp/model.onnx /tmp/tokenizer.json /app/models/
-# file: URIs bypass Spring AI's resource cache and are used in place
+COPY --from=build /opt/djl-cache /opt/djl-cache
+# file: URIs bypass Spring AI's resource cache and are used in place; DJL_CACHE_DIR points at
+# the pre-warmed PyTorch natives so a cold boot downloads nothing
 ENV SPRING_AI_EMBEDDING_TRANSFORMER_ONNX_MODEL_URI=file:/app/models/model.onnx \
-    SPRING_AI_EMBEDDING_TRANSFORMER_TOKENIZER_URI=file:/app/models/tokenizer.json
+    SPRING_AI_EMBEDDING_TRANSFORMER_TOKENIZER_URI=file:/app/models/tokenizer.json \
+    DJL_CACHE_DIR=/opt/djl-cache
 EXPOSE 8080
 
 # Memory-lean JVM defaults for a mostly-idle, single-instance dashboard. Without these the
