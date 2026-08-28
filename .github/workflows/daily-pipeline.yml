@@ -1,0 +1,38 @@
+# Kicks the app's daily refresh chain (sync → classify → embed → duplicate scan/adjudicate →
+# legacy scan → gated cluster rebuild). The deployment is serverless: this request is what
+# wakes it, so the first attempt may hit a cold boot (502) — hence the retry loop.
+#
+# Required repository secrets:
+#   PULSE_APP_URL      e.g. https://<app>.up.railway.app   (no trailing slash)
+#   PULSE_ADMIN_TOKEN  the deployment's admin token
+name: Daily pipeline
+
+on:
+  schedule:
+    - cron: '0 11 * * *'   # 11:00 UTC — 7am US Eastern
+  workflow_dispatch: {}     # manual runs from the Actions tab
+
+jobs:
+  trigger:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger pipeline run
+        run: |
+          for attempt in 1 2 3 4; do
+            code=$(curl -s -o /tmp/body -w '%{http_code}' --max-time 60 -X POST \
+              -H "X-Admin-Token: ${{ secrets.PULSE_ADMIN_TOKEN }}" \
+              "${{ secrets.PULSE_APP_URL }}/api/pipeline" || echo 000)
+            echo "attempt $attempt: HTTP $code"
+            if [ "$code" = "202" ]; then
+              echo "pipeline started"
+              exit 0
+            fi
+            if [ "$code" = "409" ]; then
+              echo "a run is already in progress — treating as success"
+              exit 0
+            fi
+            cat /tmp/body || true
+            sleep 45   # cold boot / transient — wait and retry
+          done
+          echo "pipeline trigger failed after 4 attempts"
+          exit 1

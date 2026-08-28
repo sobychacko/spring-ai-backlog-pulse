@@ -15,6 +15,8 @@ import {
   triggerSync,
   type Facets,
   triggerAdjudicate,
+  fetchPipelineStatus,
+  triggerPipeline,
 } from './api'
 import { AskBacklog } from './pages/AskBacklog'
 import { ByFacet } from './pages/ByFacet'
@@ -184,6 +186,29 @@ export default function App() {
     }
   }
 
+  async function handlePipeline() {
+    setAdminOpen(false)
+    setStatus('Pipeline running… (sync → embed → scan → adjudicate → legacy → clusters)')
+    try {
+      const r = await triggerPipeline()
+      if (!r.started) {
+        setStatus('Pipeline already running — watching…')
+      }
+      // poll until the run finishes, then show its summary
+      for (let i = 0; i < 120; i++) {
+        await new Promise((res) => setTimeout(res, 5000))
+        const st = await fetchPipelineStatus()
+        if (!st.running) {
+          setStatus(`Pipeline: ${st.lastResult}`)
+          return
+        }
+      }
+      setStatus('Pipeline still running — see /api/pipeline/status')
+    } catch (e) {
+      setStatus(`Pipeline error: ${e}`)
+    }
+  }
+
   async function handleAdjudicate() {
     setAdminOpen(false)
     const ok = window.confirm(
@@ -348,6 +373,13 @@ export default function App() {
                     className="block w-full px-4 py-2.5 text-left text-[13px] hover:bg-[#21262d]"
                   >
                     Classify with Sonnet
+                  </button>
+                  <div className="my-1 border-t border-edge" />
+                  <button
+                    onClick={handlePipeline}
+                    className="block w-full px-4 py-2.5 text-left text-[13px] hover:bg-[#21262d]"
+                  >
+                    Run daily pipeline
                   </button>
                   <div className="my-1 border-t border-edge" />
                   <button

@@ -23,9 +23,19 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
 import org.springframework.boot.context.properties.bind.Name;
 
 @ConfigurationProperties(prefix = "pulse")
-public record PulseProperties(Ingest ingest, Classify classify, Support support, Chat chat) {
+public record PulseProperties(Ingest ingest, Classify classify, Support support, Chat chat,
+		Pipeline pipeline) {
 
 	public record Ingest(int pageSize) {
+	}
+
+	/**
+	 * Daily pipeline tuning: the duplicate-scan similarity threshold (same default the UI
+	 * uses) and the minimum number of newly embedded items before a run rebuilds theme
+	 * clusters (naming costs one LLM call per cluster, so tiny deltas keep the old clusters).
+	 */
+	public record Pipeline(@DefaultValue("0.75") double scanThreshold,
+			@DefaultValue("10") int clusterMinNewItems) {
 	}
 
 	public record Classify(int concurrency, int maxBodyChars,

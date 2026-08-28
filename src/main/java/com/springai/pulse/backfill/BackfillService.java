@@ -157,7 +157,37 @@ public class BackfillService {
 			return false;
 		}
 		this.worker.submit(() -> {
-			long start = System.currentTimeMillis();
+			try {
+				doSync();
+			}
+			finally {
+				this.syncRunning.set(false);
+			}
+		});
+		return true;
+	}
+
+	/**
+	 * Run the incremental sync on the calling thread (the pipeline's sequencing entry point —
+	 * the async trigger returns before the sync finishes, which is useless for step ordering).
+	 * @return false if a sync was already running (the step is skipped, not queued)
+	 */
+	public boolean syncNow() {
+		if (!this.syncRunning.compareAndSet(false, true)) {
+			return false;
+		}
+		try {
+			doSync();
+		}
+		finally {
+			this.syncRunning.set(false);
+		}
+		return true;
+	}
+
+	private void doSync() {
+		long start = System.currentTimeMillis();
+		{
 			try {
 				String cursor = this.syncState.getCursorIso();
 				if (cursor == null) {
@@ -184,11 +214,7 @@ public class BackfillService {
 				this.lastSyncResult = "FAILED: " + ex.getMessage();
 				logger.error("Incremental sync failed", ex);
 			}
-			finally {
-				this.syncRunning.set(false);
-			}
-		});
-		return true;
+		}
 	}
 
 	public boolean isSyncRunning() {

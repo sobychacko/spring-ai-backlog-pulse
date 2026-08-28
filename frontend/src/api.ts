@@ -494,6 +494,26 @@ export interface AdjudicateResult {
   failed: number
 }
 
+export interface PipelineStatus {
+  running: boolean
+  lastResult: string
+  lastRunAt: string | null
+}
+
+/** Kick the daily refresh chain (sync → embed → scan → adjudicate → legacy → gated clusters). */
+export async function triggerPipeline(): Promise<{ started: boolean }> {
+  const r = await post('/api/pipeline')
+  if (r.status === 409) return { started: false }
+  if (!r.ok) throw new Error(`pipeline: ${r.status}`)
+  return r.json()
+}
+
+export async function fetchPipelineStatus(): Promise<PipelineStatus> {
+  const r = await fetch('/api/pipeline/status')
+  if (!r.ok) throw new Error(`pipeline/status: ${r.status}`)
+  return r.json()
+}
+
 export async function triggerAdjudicate(): Promise<AdjudicateResult> {
   const r = await post('/api/adjudicate-duplicates')
   if (!r.ok) throw new Error(`adjudicate-duplicates: ${r.status}`)
