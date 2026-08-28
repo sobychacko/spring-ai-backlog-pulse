@@ -9,7 +9,7 @@ name: Daily pipeline
 
 on:
   schedule:
-    - cron: '0 11 * * *'   # 11:00 UTC — 7am US Eastern
+    - cron: '0 13 * * *'   # 13:00 UTC — 9am US Eastern in summer (8am after the DST switch)
   workflow_dispatch: {}     # manual runs from the Actions tab
 
 jobs:
