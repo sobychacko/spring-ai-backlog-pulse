@@ -4,7 +4,7 @@
 # failures are deterministic and fail immediately instead of retrying.
 #
 # Required repository secrets:
-#   PULSE_APP_URL      e.g. https://<app>.up.railway.app   (no trailing slash)
+#   PULSE_APP_URL      e.g. https://<app>.up.railway.app   (trailing slash tolerated)
 #   PULSE_ADMIN_TOKEN  the deployment's admin token
 name: Daily pipeline
 
@@ -18,11 +18,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Trigger pipeline run
+        env:
+          APP_URL: ${{ secrets.PULSE_APP_URL }}
         run: |
+          APP_URL="${APP_URL%/}"   # tolerate a trailing slash in the secret
           for attempt in 1 2 3 4; do
             code=$(curl -s -o /tmp/body -w '%{http_code}' --max-time 60 -X POST \
               -H "X-Admin-Token: ${{ secrets.PULSE_ADMIN_TOKEN }}" \
-              "${{ secrets.PULSE_APP_URL }}/api/pipeline") || code=000
+              "$APP_URL/api/pipeline") || code=000
             echo "attempt $attempt: HTTP $code"
             case "$code" in
               202) echo "pipeline started"; exit 0 ;;
