@@ -79,6 +79,23 @@ public class GitHubClient {
 	}
 
 	/**
+	 * Fetch the first {@code max} comments on an issue or PR, oldest first (one request, no
+	 * pagination — the callers want the thread's opening exchange, not an unbounded dump).
+	 */
+	public List<JsonNode> fetchComments(int number, int max) {
+		JsonNode arr = this.rest.get()
+			.uri("/repos/" + this.props.repo() + "/issues/" + number + "/comments?per_page="
+					+ Math.min(Math.max(max, 1), 100))
+			.retrieve()
+			.body(JsonNode.class);
+		List<JsonNode> comments = new ArrayList<>();
+		if (arr != null && arr.isArray()) {
+			arr.forEach(comments::add);
+		}
+		return comments;
+	}
+
+	/**
 	 * Fetch all items (open and closed) updated at or after {@code since}, sorted ascending by
 	 * update time so the caller can advance the cursor to the last item seen.
 	 */

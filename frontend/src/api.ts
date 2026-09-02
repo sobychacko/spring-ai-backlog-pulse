@@ -486,6 +486,76 @@ export async function decideDuplicate(id: number, confirmed: boolean): Promise<v
   if (!r.ok) throw new Error(`decide: ${r.status}`)
 }
 
+// Today's picks — high-value open issues the AI judges landable on main in about an hour.
+// Everything under effort/apiRisk/blockers/evidence/firstStep is AI-suggested; the ordering
+// is the GitHub-derived value score.
+
+export interface PickView {
+  number: number
+  title: string
+  url: string
+  reactions: number
+  comments: number
+  labels: string[]
+  type: string | null
+  area: string | null
+  severity: string | null
+  summary: string | null
+  ageDays: number
+  valueScore: number
+  effort: 'ABOUT_AN_HOUR' | 'HALF_DAY' | 'MULTI_DAY' | 'CANNOT_TELL'
+  apiRisk: 'NONE' | 'ADDITIVE' | 'BREAKING' | 'CANNOT_TELL'
+  blockers: string[]
+  likelyScope: string | null
+  evidence: string | null
+  firstStep: string | null
+  confidence: 'LOW' | 'MEDIUM' | 'HIGH' | null
+  modelUsed: string
+  assessedAt: string | null
+  decision: 'TAKEN' | 'SKIPPED' | null
+  decidedAt: string | null
+}
+
+export interface PicksResponse {
+  picks: PickView[]
+  assessed: PickView[]
+  decided: PickView[]
+  counts: Record<string, number>
+  pendingAssessment: number
+  lastAssessedAt: string | null
+  model: string
+}
+
+export async function fetchPicks(efforts: string[], limit = 10): Promise<PicksResponse> {
+  const q = new URLSearchParams()
+  efforts.forEach(e => q.append('effort', e))
+  q.set('limit', String(limit))
+  const r = await fetch(`/api/picks?${q}`)
+  if (!r.ok) throw new Error(`picks: ${r.status}`)
+  return r.json()
+}
+
+export interface PicksAssessResult {
+  assessed: number
+  failed: number
+  aboutAnHour: number
+  halfDay: number
+  multiDay: number
+  cannotTell: number
+}
+
+export async function triggerPicksAssess(limit = 0): Promise<PicksAssessResult> {
+  const r = await post(`/api/picks-assess?limit=${limit}`)
+  if (!r.ok) throw new Error(`picks-assess: ${r.status}`)
+  return r.json()
+}
+
+/** TAKEN / SKIPPED remove a pick from the list; NONE undoes. Admin token required when deployed. */
+export async function decidePick(number: number, decision: 'TAKEN' | 'SKIPPED' | 'NONE'): Promise<void> {
+  const r = await post(`/api/picks/${number}/decide?decision=${decision}`)
+  if (!r.ok) throw new Error(`decide pick: ${r.status}`)
+}
+
 export interface AdjudicateResult {
   adjudicated: number
   duplicate?: number

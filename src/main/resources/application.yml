@@ -29,6 +29,11 @@ spring:
   ai:
     anthropic:
       api-key: ${ANTHROPIC_API_KEY:}
+      # Identity-linked API keys must name the workspace each request acts in (the API answers
+      # 400 "anthropic-workspace-id is required" otherwise). Classic keys: leave the variable
+      # unset — a blank value is pruned before the header is sent (BlankHeaderPruner).
+      custom-headers:
+        anthropic-workspace-id: ${ANTHROPIC_WORKSPACE_ID:}
       chat:
         options:
           model: claude-haiku-4-5
@@ -90,6 +95,16 @@ pulse:
     # backfill/sync also classify with it automatically (manual POST /api/classify-sonnet otherwise)
     sonnet-model: claude-sonnet-4-6
     dual-model: false
+  picks:
+    # "Today's picks": high-value open issues a maintainer can land on main in about an hour.
+    # The candidate pool is deterministic (top open issues by value score that are unassigned,
+    # not legacy-only, and have no open PR attached); each candidate's title, body, and comment
+    # thread go to the model below once per content/thread change. ~50 calls on first run,
+    # a handful per day after that.
+    model: claude-opus-5
+    pool-size: 50
+    max-comments: 25
+    max-comment-chars: 1500
 
 logging:
   level:

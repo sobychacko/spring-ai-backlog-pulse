@@ -24,7 +24,7 @@ import org.springframework.boot.context.properties.bind.Name;
 
 @ConfigurationProperties(prefix = "pulse")
 public record PulseProperties(Ingest ingest, Classify classify, Support support, Chat chat,
-		Pipeline pipeline) {
+		Pipeline pipeline, Picks picks) {
 
 	public record Ingest(int pageSize) {
 	}
@@ -40,6 +40,15 @@ public record PulseProperties(Ingest ingest, Classify classify, Support support,
 
 	public record Classify(int concurrency, int maxBodyChars,
 			@DefaultValue("claude-sonnet-4-6") String sonnetModel, @DefaultValue("false") boolean dualModel) {
+	}
+
+	/**
+	 * Quick picks: the model that assesses tackleability (the one judgment where a wrong call
+	 * wastes the maintainer's morning, so it defaults to the strongest tier), how many top-value
+	 * issues form the candidate pool, and how much of each comment thread the model gets to read.
+	 */
+	public record Picks(@DefaultValue("claude-opus-5") String model, @DefaultValue("50") int poolSize,
+			@DefaultValue("25") int maxComments, @DefaultValue("1500") int maxCommentChars) {
 	}
 
 	/** OSS support policy: branches whose items belong in the Legacy Review tab. */

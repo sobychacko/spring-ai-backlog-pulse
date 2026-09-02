@@ -1,5 +1,5 @@
-# Kicks the app's daily refresh chain (sync → classify → embed → duplicate scan/adjudicate →
-# legacy scan → gated cluster rebuild). The deployment is serverless: this request is what
+# Kicks the app's daily refresh chain (sync+classify → embed → duplicate scan/adjudicate →
+# legacy scan → quick-pick assessment → gated cluster rebuild). The deployment is serverless: this request is what
 # wakes it, so the first attempt may hit a cold boot (502) — hence the retry loop. Auth
 # failures are deterministic and fail immediately instead of retrying.
 #

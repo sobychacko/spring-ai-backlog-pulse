@@ -28,6 +28,7 @@ import com.springai.pulse.config.PulseProperties;
 import com.springai.pulse.embed.DuplicateScanService;
 import com.springai.pulse.embed.EmbedService;
 import com.springai.pulse.legacy.LegacyReviewService;
+import com.springai.pulse.picks.QuickPickService;
 import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -48,6 +49,8 @@ import org.springframework.stereotype.Service;
  * <li>Duplicate scan — incremental; new pairs are adjudicated by the scan itself.
  * <li>Adjudication sweep — retries pairs whose earlier verdict call failed.
  * <li>Legacy scan — content-hash keyed, only new/changed candidates.
+ * <li>Quick picks — assess new/changed candidates in the top-value pool (runs after legacy so a
+ * LEGACY_ONLY verdict from this run already excludes the item).
  * <li>Cluster rebuild — only when this run embedded at least
  * {@code pulse.pipeline.cluster-min-new-items} items, because membership is free but naming
  * costs one LLM call per cluster; below the threshold the old clusters stay.
@@ -68,6 +71,8 @@ public class PipelineService {
 
 	private final LegacyReviewService legacy;
 
+	private final QuickPickService picks;
+
 	private final ClusterService cluster;
 
 	private final PulseProperties.Pipeline pipelineProps;
@@ -85,11 +90,12 @@ public class PipelineService {
 	private volatile Instant lastRunAt;
 
 	public PipelineService(BackfillService backfill, EmbedService embed, DuplicateScanService dupScan,
-			LegacyReviewService legacy, ClusterService cluster, PulseProperties props) {
+			LegacyReviewService legacy, QuickPickService picks, ClusterService cluster, PulseProperties props) {
 		this.backfill = backfill;
 		this.embed = embed;
 		this.dupScan = dupScan;
 		this.legacy = legacy;
+		this.picks = picks;
 		this.cluster = cluster;
 		// pulse.pipeline binds to null when the whole block is absent (per-component defaults
 		// only apply once the record itself binds) — fall back to the documented defaults
@@ -140,6 +146,11 @@ public class PipelineService {
 		step(summary, "legacy", () -> {
 			LegacyReviewService.ScanResult r = this.legacy.scan(0);
 			return r.scanned() + " scanned" + (r.failed() > 0 ? ", " + r.failed() + " failed" : "");
+		});
+
+		step(summary, "picks", () -> {
+			QuickPickService.AssessResult r = this.picks.assess(0);
+			return r.assessed() + " assessed" + (r.failed() > 0 ? ", " + r.failed() + " failed" : "");
 		});
 
 		int minNew = this.pipelineProps.clusterMinNewItems();

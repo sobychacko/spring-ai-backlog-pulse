@@ -10,6 +10,7 @@ import {
   triggerEmbed,
   triggerIngest,
   triggerLegacyScan,
+  triggerPicksAssess,
   triggerScanDuplicates,
   triggerSonnetClassify,
   triggerSync,
@@ -263,6 +264,29 @@ export default function App() {
     }
   }
 
+  async function handlePicksAssess() {
+    setAdminOpen(false)
+    const ok = window.confirm(
+      "Assess today's picks with Opus?\n" +
+      'Top ~50 high-value open issues (title, body, comments) ≈ $2 one-time; ' +
+      're-runs only touch new/changed items.',
+    )
+    if (!ok) return
+    setStatus('Assessing quick picks…')
+    try {
+      const r = await triggerPicksAssess()
+      setStatus(
+        r.assessed === 0 && r.failed === 0
+          ? 'Quick picks: nothing to do (pool is current)'
+          : `Quick picks: ${r.aboutAnHour} about an hour · ${r.halfDay} half-day · ${r.multiDay} multi-day · ${r.cannotTell} unclear` +
+            (r.failed ? ` · ${r.failed} failed` : ''),
+      )
+      setRefreshKey(k => k + 1)
+    } catch (e) {
+      setStatus(`Quick picks error: ${e}`)
+    }
+  }
+
   function handleSetAdminToken() {
     setAdminOpen(false)
     const token = window.prompt(
@@ -423,6 +447,12 @@ export default function App() {
                     className="block w-full px-4 py-2.5 text-left text-[13px] hover:bg-[#21262d]"
                   >
                     Scan legacy candidates
+                  </button>
+                  <button
+                    onClick={handlePicksAssess}
+                    className="block w-full px-4 py-2.5 text-left text-[13px] hover:bg-[#21262d]"
+                  >
+                    Assess today's picks
                   </button>
                   <div className="my-1 border-t border-edge" />
                   <button

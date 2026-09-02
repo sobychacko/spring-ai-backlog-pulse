@@ -99,62 +99,70 @@ public class AnalyticsRepository {
 				rs.getDouble("avg_engagement"), rs.getLong("total_engagement"), rs.getInt("pulse_score")));
 	}
 
+	/**
+	 * The value-score CTEs, shared with the quick-pick queries so both rank issues identically.
+	 * Yields {@code value_scores(number, age_days, value_score)} over open, non-bot issues (the
+	 * "reactions 0 but 20+ comments" exclusion drops bot-driven threads). Every input is a GitHub
+	 * fact except the two classification flags, which are AI-suggested and weighted at 10% each.
+	 * Callers must bind {@code :model}.
+	 */
+	public static final String VALUE_SCORE_CTES = """
+			item_scores as (
+			  select
+			    i.number,
+			    (i.reactions_total + i.comments_count)::numeric           as engagement,
+			    extract(epoch from (now() - i.created_at)) / 86400        as age_days,
+			    c.good_first_issue,
+			    c.severity
+			  from gh_item i
+			  left join classification c on c.item_number = i.number and c.model_used = :model
+			  where i.state = 'open'
+			    and i.kind = 'issue'
+			    and (i.author is null or i.author not like '%[bot]%')
+			    and not (i.reactions_total = 0 and i.comments_count > 20)
+			),
+			maxima as (
+			  select
+			    greatest(max(engagement), 1)::numeric as max_eng,
+			    greatest(max(age_days), 1)::numeric   as max_age
+			  from item_scores
+			),
+			value_scores as (
+			  select
+			    s.number,
+			    round(s.age_days)::integer as age_days,
+			    round((
+			      0.50 * s.engagement / m.max_eng +
+			      0.30 * ln(s.age_days + 1) / ln(m.max_age + 1) +
+			      0.10 * case when s.good_first_issue then 1.0 else 0.0 end +
+			      0.10 * case
+			                when s.severity in ('HIGH', 'CRITICAL') then 1.0
+			                when s.severity = 'MEDIUM'              then 0.5
+			                else 0.0
+			              end
+			    ) * 100)::integer as value_score
+			  from item_scores s, maxima m
+			)
+			""";
+
 	public List<ValueItem> valueQueue(int limit, String model) {
-		return this.jdbc.query("""
-				with item_scores as (
-				  select
-				    i.number,
-				    i.kind,
-				    i.title,
-				    i.url,
-				    i.reactions_total,
-				    i.comments_count,
-				    i.created_at,
-				    c.type,
-				    c.area,
-				    c.severity,
-				    c.good_first_issue,
-				    c.summary,
-				    c.providers,
-				    (i.reactions_total + i.comments_count)::numeric           as engagement,
-				    extract(epoch from (now() - i.created_at)) / 86400        as age_days,
-				    (select count(*) from item_link il
-				     join gh_item other on other.number =
-				         case when il.from_number = i.number then il.to_number else il.from_number end
-				     where il.source = 'embedding' and il.decided_at is null
-				       and other.state = 'open'
-				       and (il.from_number = i.number or il.to_number = i.number))::int as dup_count
-				  from gh_item i
-				  left join classification c on c.item_number = i.number and c.model_used = :model
-				  where i.state = 'open'
-				    and i.kind = 'issue'
-				    and (i.author is null or i.author not like '%[bot]%')
-				    and not (i.reactions_total = 0 and i.comments_count > 20)
-				),
-				maxima as (
-				  select
-				    greatest(max(engagement), 1)::numeric as max_eng,
-				    greatest(max(age_days), 1)::numeric   as max_age
-				  from item_scores
-				)
+		return this.jdbc.query("with " + VALUE_SCORE_CTES + """
 				select
-				  s.number, s.kind, s.title, s.url,
-				  s.reactions_total, s.comments_count,
-				  s.type, s.area, s.providers, s.severity, s.good_first_issue, s.summary,
-				  s.dup_count,
-				  round(s.age_days)::integer as age_days,
-				  round((
-				    0.50 * s.engagement / m.max_eng +
-				    0.30 * ln(s.age_days + 1) / ln(m.max_age + 1) +
-				    0.10 * case when s.good_first_issue then 1.0 else 0.0 end +
-				    0.10 * case
-				              when s.severity in ('HIGH', 'CRITICAL') then 1.0
-				              when s.severity = 'MEDIUM'              then 0.5
-				              else 0.0
-				            end
-				  ) * 100)::integer as value_score
-				from item_scores s, maxima m
-				order by value_score desc
+				  i.number, i.kind, i.title, i.url,
+				  i.reactions_total, i.comments_count,
+				  c.type, c.area, c.providers, c.severity, c.good_first_issue, c.summary,
+				  (select count(*) from item_link il
+				   join gh_item other on other.number =
+				       case when il.from_number = i.number then il.to_number else il.from_number end
+				   where il.source = 'embedding' and il.decided_at is null
+				     and other.state = 'open'
+				     and (il.from_number = i.number or il.to_number = i.number))::int as dup_count,
+				  v.age_days,
+				  v.value_score
+				from value_scores v
+				join gh_item i on i.number = v.number
+				left join classification c on c.item_number = i.number and c.model_used = :model
+				order by v.value_score desc, i.number
 				limit :limit
 				""", modelParams(model).addValue("limit", Math.min(Math.max(limit, 1), 100)),
 				(rs, n) -> new ValueItem(rs.getInt("number"), rs.getString("kind"), rs.getString("title"),

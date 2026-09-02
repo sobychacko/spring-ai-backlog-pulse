@@ -35,7 +35,7 @@ A few principles the whole app is built around:
 
 | Tab | What it answers |
 |---|---|
-| Overview | Backlog size, age, % triaged, type/severity breakdowns |
+| Overview | Today's picks (high-value issues a maintainer can land on main in about an hour), then backlog size, age, % triaged, type/severity breakdowns |
 | By Facet | Distributions by type, area, provider, vector store |
 | Backlog Pulse | Areas ranked by volume, recent velocity, and engagement |
 | Value Queue | Which issues are worth picking up right now |
@@ -106,6 +106,7 @@ curl -X POST localhost:8080/api/backfill        # ingest + classify (one-time, a
 curl -X POST localhost:8080/api/embed           # local embeddings, free
 curl -X POST localhost:8080/api/scan-duplicates # candidate pairs
 curl -X POST localhost:8080/api/cluster         # theme clusters, a few cents
+curl -X POST localhost:8080/api/picks-assess    # today's picks, ~$2 first run (Opus)
 ```
 
 Open http://localhost:8080.
