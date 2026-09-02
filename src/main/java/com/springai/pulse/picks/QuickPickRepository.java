@@ -80,27 +80,34 @@ public class QuickPickRepository {
 	}
 
 	/**
-	 * The top {@code poolSize} eligible issues by value score that have no assessment yet, or
-	 * whose text or comment thread changed since the last one. Decided items (taken or skipped)
-	 * are never re-assessed — the human's call stands.
+	 * Members of the pool — the top {@code poolSize} eligible issues by value score — that have
+	 * no assessment yet, or whose text or comment thread changed since the last one. The pool is
+	 * cut <em>before</em> the assessment state is checked: otherwise every run would move on to
+	 * the next 50 unassessed issues and the daily cost would never settle. Decided items (taken
+	 * or skipped) are never re-assessed — the human's call stands.
 	 */
 	public List<Candidate> findNeedingAssessment(String model, int poolSize) {
 		var params = new MapSqlParameterSource().addValue("model", model).addValue("poolSize", poolSize);
 		return this.jdbc.query("with " + AnalyticsRepository.VALUE_SCORE_CTES + """
-				select i.number, i.title, i.body, i.labels::text as labels, i.content_hash, i.comments_count,
-				       v.value_score
-				from value_scores v
-				join gh_item i on i.number = v.number
-				left join classification c on c.item_number = i.number and c.model_used = :model
-				left join quick_pick qp on qp.item_number = i.number
-				where
+				, pool as (
+				  select i.number, i.title, i.body, i.labels::text as labels, i.content_hash, i.comments_count,
+				         v.value_score
+				  from value_scores v
+				  join gh_item i on i.number = v.number
+				  left join classification c on c.item_number = i.number and c.model_used = :model
+				  where
 				""" + ELIGIBLE + """
-				  and (qp.item_number is null
-				       or (qp.decision is null
-				           and (qp.content_hash is distinct from i.content_hash
-				                or qp.comments_seen <> i.comments_count)))
-				order by v.value_score desc, i.number
-				limit :poolSize
+				  order by v.value_score desc, i.number
+				  limit :poolSize
+				)
+				select p.*
+				from pool p
+				left join quick_pick qp on qp.item_number = p.number
+				where qp.item_number is null
+				   or (qp.decision is null
+				       and (qp.content_hash is distinct from p.content_hash
+				            or qp.comments_seen <> p.comments_count))
+				order by p.value_score desc, p.number
 				""", params,
 				(rs, n) -> new Candidate(rs.getInt("number"), rs.getString("title"), rs.getString("body"),
 						parseList(rs.getString("labels")), rs.getString("content_hash"),
