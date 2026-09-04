@@ -5,7 +5,6 @@ import { EChart } from '../components/EChart'
 import { StatCard } from '../components/StatCard'
 import { escapeHtml } from '../html'
 import { ItemDrawer } from '../components/ItemDrawer'
-import { TodaysPicks } from '../components/TodaysPicks'
 
 // Shared palette / text style for all charts
 const BASE_TEXT = { color: '#8b949e', fontSize: 12, fontFamily: 'inherit' }
@@ -139,9 +138,6 @@ export function Overview({ facets: f }: Props) {
 
   return (
     <div className="space-y-6">
-      {/* Today's picks — the morning list */}
-      <TodaysPicks />
-
       {/* Stat cards */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-7">
         <StatCard label="Total items" value={f.totalItems.toLocaleString()} />

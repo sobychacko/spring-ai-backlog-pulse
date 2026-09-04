@@ -35,14 +35,15 @@ A few principles the whole app is built around:
 
 | Tab | What it answers |
 |---|---|
-| Overview | Today's picks (high-value issues a maintainer can land on main in about an hour), then backlog size, age, % triaged, type/severity breakdowns |
+| Today's Picks | High-value open issues a maintainer could land on main in about an hour: unassigned, no open PR, no API break, nothing blocking. Effort and blockers are AI-suggested from the issue and its comment thread |
+| Overview | Backlog size, age, % triaged, type/severity breakdowns |
 | By Facet | Distributions by type, area, provider, vector store |
 | Backlog Pulse | Areas ranked by volume, recent velocity, and engagement |
 | Value Queue | Which issues are worth picking up right now |
 | Theme Map | Clusters discovered from embeddings, plus an area-by-week heatmap |
 | Duplicates | Likely duplicate/related pairs. Read-only: close the real duplicate on GitHub and the pair clears on the next sync |
 | PR Review | Easy-to-review PRs, PRs on inactive branches, community PRs waiting on a first response, stale PRs |
-| Search | Keyword search plus semantic search (describe the problem in plain words); item details show their nearest semantic neighbors |
+| Search & Ask | Keyword and semantic search (describe the problem in plain words), plus a chat mode that answers questions about the backlog from live data |
 
 ## Architecture
 

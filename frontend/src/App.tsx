@@ -19,21 +19,23 @@ import {
   fetchPipelineStatus,
   triggerPipeline,
 } from './api'
-import { AskBacklog } from './pages/AskBacklog'
 import { ByFacet } from './pages/ByFacet'
 import { BacklogPulse } from './pages/BacklogPulse'
 import { DuplicateReview } from './pages/DuplicateReview'
 import { LegacyReview } from './pages/LegacyReview'
 import { Overview } from './pages/Overview'
 import { PRReview } from './pages/PRReview'
-import { Search } from './pages/Search'
+import { Explore } from './pages/Explore'
 import { ThemeMap } from './pages/ThemeMap'
 import { ValueQueue } from './pages/ValueQueue'
+import { TodaysPicks } from './components/TodaysPicks'
 
-type Tab = 'overview' | 'facet' | 'pulse' | 'value' | 'theme-map' | 'duplicates' | 'prs' | 'legacy' | 'search' | 'ask'
+type Tab = 'picks' | 'overview' | 'facet' | 'pulse' | 'value' | 'theme-map' | 'duplicates' | 'prs' | 'legacy' | 'search'
 
 // Per-tab accent + glyph. `active` must be literal class strings so Tailwind's JIT sees them.
 const TABS: { id: Tab; label: string; icon: string; active: string }[] = [
+  { id: 'picks',      label: "Today's Picks",    icon: '☀',
+    active: 'text-emerald-300 bg-emerald-400/10 border-emerald-400/40 shadow-[0_0_16px_-4px_rgba(52,211,153,0.6)]' },
   { id: 'overview',   label: 'Overview',         icon: '◉',
     active: 'text-sky-300 bg-sky-400/10 border-sky-400/40 shadow-[0_0_16px_-4px_rgba(56,189,248,0.6)]' },
   { id: 'facet',      label: 'By Facet',         icon: '▤',
@@ -50,14 +52,12 @@ const TABS: { id: Tab; label: string; icon: string; active: string }[] = [
     active: 'text-orange-300 bg-orange-400/10 border-orange-400/40 shadow-[0_0_16px_-4px_rgba(251,146,60,0.6)]' },
   { id: 'legacy',     label: 'Legacy',           icon: '⊘',
     active: 'text-rose-300 bg-rose-400/10 border-rose-400/40 shadow-[0_0_16px_-4px_rgba(251,113,133,0.6)]' },
-  { id: 'search',     label: 'Search',           icon: '⌕',
+  { id: 'search',     label: 'Search & Ask',     icon: '⌕',
     active: 'text-indigo-300 bg-indigo-400/10 border-indigo-400/40 shadow-[0_0_16px_-4px_rgba(129,140,248,0.6)]' },
-  { id: 'ask',        label: 'Ask',              icon: '✦',
-    active: 'text-teal-300 bg-teal-400/10 border-teal-400/40 shadow-[0_0_16px_-4px_rgba(45,212,191,0.6)]' },
 ]
 
 export default function App() {
-  const [tab, setTab] = useState<Tab>('overview')
+  const [tab, setTab] = useState<Tab>('picks')
   const [facets, setFacets] = useState<Facets | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -479,6 +479,8 @@ export default function App() {
             <div className="rounded-lg border border-danger bg-surface p-4 text-danger">
               {error}
             </div>
+          ) : tab === 'picks' ? (
+            <TodaysPicks />
           ) : facets && tab === 'overview' ? (
             <Overview facets={facets} />
           ) : facets && tab === 'facet' ? (
@@ -496,9 +498,7 @@ export default function App() {
           ) : tab === 'legacy' ? (
             <LegacyReview />
           ) : tab === 'search' ? (
-            <Search />
-          ) : tab === 'ask' ? (
-            <AskBacklog />
+            <Explore />
           ) : null}
         </div>
       </main>
